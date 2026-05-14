@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+      "Bash(expo *)",
+      "Bash(git *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\stani\\Desktop\\hunger game"
+    ]
+  }
+}

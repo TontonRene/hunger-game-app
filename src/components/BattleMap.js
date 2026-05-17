@@ -82,9 +82,10 @@ function buildTerrainImage(biome){
     pix[i]=Math.min(255,r*sh)|0; pix[i+1]=Math.min(255,g*sh)|0;
     pix[i+2]=Math.min(255,b*sh)|0; pix[i+3]=255;
   }
+  const data = Skia.Data.fromBytes(pix);
   return Skia.Image.MakeImage(
     {width:TC,height:TC,alphaType:AlphaType.Opaque,colorType:ColorType.RGBA_8888},
-    pix, TC*4
+    data, TC*4
   );
 }
 

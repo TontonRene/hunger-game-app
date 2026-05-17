@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput,
   TouchableOpacity, Alert, KeyboardAvoidingView, Platform,
@@ -14,6 +14,20 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [showUrlConfig, setShowUrlConfig] = useState(false);
   const [serverInput, setServerInput] = useState('');
+  const [remember, setRemember] = useState(true);
+
+  // Charger les identifiants sauvegardés au démarrage
+  useEffect(() => {
+    async function loadSaved() {
+      try {
+        const savedUser = await AsyncStorage.getItem('saved_username');
+        const savedPass = await AsyncStorage.getItem('saved_password');
+        if (savedUser) setUsername(savedUser);
+        if (savedPass) setPassword(savedPass);
+      } catch {}
+    }
+    loadSaved();
+  }, []);
 
   async function saveServerUrl() {
     const url = serverInput.trim().replace(/\/$/, '');
@@ -30,6 +44,14 @@ export default function AuthScreen() {
     try {
       if (mode === 'login') await login(username.trim(), password);
       else await register(username.trim(), password);
+      // Sauvegarder si "se souvenir"
+      if (remember) {
+        await AsyncStorage.setItem('saved_username', username.trim());
+        await AsyncStorage.setItem('saved_password', password);
+      } else {
+        await AsyncStorage.removeItem('saved_username');
+        await AsyncStorage.removeItem('saved_password');
+      }
     } catch (e) {
       const msg = e.response?.data?.error || e.message || 'Serveur inaccessible';
       Alert.alert('Erreur', `${msg}\n\nVérifie l'URL du serveur (⚙️ en bas).`);
@@ -107,6 +129,18 @@ export default function AuthScreen() {
           secureTextEntry
         />
 
+        {/* Se souvenir de moi */}
+        <TouchableOpacity
+          style={styles.rememberRow}
+          onPress={() => setRemember(r => !r)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.checkbox, remember && styles.checkboxActive]}>
+            {remember && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+          <Text style={styles.rememberText}>Se souvenir de moi</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
           onPress={handleSubmit}
@@ -147,6 +181,20 @@ const styles = StyleSheet.create({
     color: '#fff', fontSize: 15,
     borderWidth: 1, borderColor: '#2a2a4a',
   },
+
+  rememberRow: {
+    flexDirection: 'row', alignItems: 'center',
+    width: '100%', marginBottom: 12, gap: 10,
+  },
+  checkbox: {
+    width: 20, height: 20, borderRadius: 5,
+    borderWidth: 1.5, borderColor: '#444',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxActive: { backgroundColor: '#e2b96f', borderColor: '#e2b96f' },
+  checkmark: { color: '#0d0d1a', fontSize: 12, fontWeight: 'bold' },
+  rememberText: { color: '#666', fontSize: 13 },
+
   submitBtn: {
     width: '100%', backgroundColor: '#e2b96f',
     borderRadius: 10, padding: 16, alignItems: 'center', marginTop: 8,

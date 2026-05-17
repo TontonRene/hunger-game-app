@@ -4,7 +4,7 @@ import { useGame } from '../context/GameContext';
 import BattleMap from '../components/BattleMap';
 import api from '../utils/api';
 
-const ADMIN = 'stan';
+const ADMIN = 'GameMaster';
 
 export default function BatailleScreen() {
   const { battleState, battleId, setBattleId, champion, sendSupply, user } = useGame();

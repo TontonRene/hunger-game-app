@@ -3,11 +3,11 @@
  * Rendu GPU via Skia PictureRecorder + requestAnimationFrame sur JS thread.
  * Compatible Expo Go SDK 54.
  */
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  AlphaType, ColorType, PaintStyle, FillType,
+  PaintStyle, FillType,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -31,63 +31,14 @@ const POI_COLORS = {
 const WORLD = 300;
 const TC    = 128;
 
-// ── Terrain ───────────────────────────────────────────────────────────────
-function vNoise(x,y,s){
-  const ix=Math.floor(x/s),iy=Math.floor(y/s);
-  const fx=x/s-ix,fy=y/s-iy;
-  const ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy);
-  const h=n=>(Math.abs(Math.sin(n*127.1+3.14)*43758.5453))%1;
-  const s00=h(ix*1000+iy),s10=h((ix+1)*1000+iy),
-        s01=h(ix*1000+iy+1),s11=h((ix+1)*1000+iy+1);
-  return s00*(1-ux)*(1-uy)+s10*ux*(1-uy)+s01*(1-ux)*uy+s11*ux*uy;
-}
-function getH(nx,ny){
-  let h=vNoise(nx,ny,0.28)*0.50+vNoise(nx,ny,0.14)*0.28
-        +vNoise(nx,ny,0.07)*0.14+vNoise(nx,ny,0.035)*0.08;
-  const dx=nx-0.5,dy=ny-0.5,r=Math.sqrt(dx*dx+dy*dy);
-  h-=Math.pow(Math.max(0,r-0.40),1.8)*2.2;
-  return Math.max(0,Math.min(1,h));
-}
-function tColor(h,biome){
-  if(h<0.20)return[28,78,138];
-  if(h<0.28)return[40,100,170];
-  switch(biome){
-    case 'désert':
-      if(h<0.38)return[210,185,90];if(h<0.60)return[195,155,65];
-      if(h<0.75)return[160,125,50];return[145,115,95];
-    case 'toundra':
-      if(h<0.36)return[190,205,210];if(h<0.58)return[175,195,185];
-      if(h<0.75)return[155,170,165];return[215,220,230];
-    case 'marais':
-      if(h<0.36)return[40,75,50];if(h<0.58)return[55,90,55];
-      if(h<0.72)return[40,70,40];return[90,95,100];
-    case 'montagne':
-      if(h<0.36)return[100,105,110];if(h<0.58)return[115,120,128];
-      if(h<0.75)return[135,138,148];return[210,215,225];
-    default:
-      if(h<0.36)return[175,150,72];if(h<0.56)return[60,118,50];
-      if(h<0.72)return[35,78,32];if(h<0.86)return[105,108,118];
-      return[210,215,225];
-  }
-}
-function buildTerrainImage(biome){
-  const pix=new Uint8Array(TC*TC*4);
-  for(let y=0;y<TC;y++) for(let x=0;x<TC;x++){
-    const h =getH(x/TC,y/TC);
-    const hl=getH(Math.max(0,x-1)/TC,y/TC),hr=getH(Math.min(TC-1,x+1)/TC,y/TC);
-    const hu=getH(x/TC,Math.max(0,y-1)/TC),hd=getH(x/TC,Math.min(TC-1,y+1)/TC);
-    const sh=Math.max(0.45,Math.min(1.35,0.85+(hl-hr)*2.2+(hu-hd)*1.4));
-    const [r,g,b]=tColor(h,biome);
-    const i=(y*TC+x)*4;
-    pix[i]=Math.min(255,r*sh)|0; pix[i+1]=Math.min(255,g*sh)|0;
-    pix[i+2]=Math.min(255,b*sh)|0; pix[i+3]=255;
-  }
-  const data = Skia.Data.fromBytes(pix);
-  return Skia.Image.MakeImage(
-    {width:TC,height:TC,alphaType:AlphaType.Opaque,colorType:ColorType.RGBA_8888},
-    data, TC*4
-  );
-}
+// ── Couleur de terrain par biome ─────────────────────────────────────────
+const BIOME_COLORS = {
+  'forêt':    { base:'#1a3a1a', accent:'#2d5a27' },
+  'désert':   { base:'#5a4a1a', accent:'#8a7a2a' },
+  'toundra':  { base:'#2a3a4a', accent:'#4a6a7a' },
+  'marais':   { base:'#1a2a1a', accent:'#2a4a2a' },
+  'montagne': { base:'#2a2a3a', accent:'#4a4a5a' },
+};
 
 // ── Étoiles ───────────────────────────────────────────────────────────────
 const STARS = Array.from({length:120},()=>({
@@ -122,7 +73,7 @@ function clampCam(x,y,W,H,z){
 }
 
 // ── Fonction de dessin principal ──────────────────────────────────────────
-function drawScene(canvas, t, v, cx, cy, z, img, fm, fs, W, H){
+function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
   const phase   = v.dayPhase||0;
   const isNight = phase>=18;
   const isDusk  = phase>=15&&phase<18;
@@ -132,14 +83,10 @@ function drawScene(canvas, t, v, cx, cy, z, img, fm, fs, W, H){
   // Fond
   canvas.drawColor(Skia.Color(isNight?'#04050e':'#0a0a18'));
 
-  // Terrain
-  if(img){
-    canvas.drawImageRect(img,
-      Skia.XYWHRect(0,0,TC,TC),
-      Skia.XYWHRect(ox,oy,wPx,wPx),
-      Skia.Paint()
-    );
-  }
+  // Terrain (couleur solide par biome)
+  const bc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
+  canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkFill(bc.base));
+  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.1,oy+wPx*0.1,wPx*0.8,wPx*0.8), mkAlpha(bc.accent,0.4));
 
   // Overlay nuit
   if(dayFrac>0){
@@ -347,13 +294,8 @@ function drawScene(canvas, t, v, cx, cy, z, img, fm, fs, W, H){
   const mmx=MMP, mmy=H-MM-MMP;
   const sc=MM/WORLD;
   canvas.drawRect(Skia.XYWHRect(mmx-1,mmy-1,MM+2,MM+2),mkAlpha('#000000',0.75));
-  if(img){
-    canvas.drawImageRect(img,
-      Skia.XYWHRect(0,0,TC,TC),
-      Skia.XYWHRect(mmx,mmy,MM,MM),
-      mkAlpha('#ffffff',0.78)
-    );
-  }
+  const mmbc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
+  canvas.drawRect(Skia.XYWHRect(mmx,mmy,MM,MM),mkFill(mmbc.base));
   if(dayFrac>0)
     canvas.drawRect(Skia.XYWHRect(mmx,mmy,MM,MM),mkAlpha('#050a28',dayFrac*0.52));
   if(zone){
@@ -400,12 +342,6 @@ export default function BattleMap({ battleState, onChampionTap }) {
     traps:[], supplies:[], pois:[], biome:'forêt', followId:null,
   });
 
-  // ── Terrain ──────────────────────────────────────────────────────────────
-  const biome      = battleState?.map?.biome || 'forêt';
-  const terrainImg = useMemo(()=>buildTerrainImage(biome),[biome]);
-  const terrainRef = useRef(terrainImg);
-  useEffect(()=>{ terrainRef.current=buildTerrainImage(biome); },[biome]);
-
   // ── Polices ───────────────────────────────────────────────────────────────
   const fontSmRef  = useRef(Skia.Font(null,9));
   const fontMidRef = useRef(Skia.Font(null,11));
@@ -447,7 +383,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
       drawScene(
         canvas, timeRef.current, gvisRef.current,
         camX.current, camY.current, z,
-        terrainRef.current, fontMidRef.current, fontSmRef.current, W, H
+        fontMidRef.current, fontSmRef.current, W, H
       );
       setPicture(recorder.finishRecordingAsPicture());
 

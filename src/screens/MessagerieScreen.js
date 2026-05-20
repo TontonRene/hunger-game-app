@@ -38,9 +38,15 @@ export default function MessagerieScreen() {
 
   function renderMessage({ item }) {
     const isMe = item.sponsorId === user?.id;
+    const authorLine = item.champName
+      ? `${item.username}  ⚔️ ${item.champName}`
+      : item.username;
     return (
       <View style={[styles.msgWrapper, isMe && styles.msgWrapperMe]}>
-        {!isMe && <Text style={styles.msgAuthor}>{item.username}</Text>}
+        {!isMe && <Text style={styles.msgAuthor}>{authorLine}</Text>}
+        {isMe && item.champName && (
+          <Text style={[styles.msgAuthor, styles.msgAuthorMe]}>{item.champName} ⚔️</Text>
+        )}
         <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
           <Text style={[styles.msgText, isMe && styles.msgTextMe]}>{item.text}</Text>
         </View>
@@ -109,7 +115,8 @@ const styles = StyleSheet.create({
 
   msgWrapper: { marginBottom: 12, maxWidth: '80%', alignSelf: 'flex-start' },
   msgWrapperMe: { alignSelf: 'flex-end' },
-  msgAuthor: { color: '#e2b96f', fontSize: 11, marginBottom: 3, marginLeft: 4 },
+  msgAuthor:   { color: '#e2b96f', fontSize: 11, marginBottom: 3, marginLeft: 4 },
+  msgAuthorMe: { textAlign: 'right', marginRight: 4, marginLeft: 0 },
   bubble: {
     borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12,
   },

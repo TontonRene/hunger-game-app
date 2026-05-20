@@ -133,6 +133,7 @@ export function GameProvider({ children }) {
     const res = await api.post('/api/messages', {
       sponsorId: user.id,
       username: user.username,
+      champName: champion?.name || null,
       text,
     });
     setMessages((prev) => [...prev, res.data]);

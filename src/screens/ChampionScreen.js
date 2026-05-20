@@ -17,6 +17,22 @@ const STAT_LABELS = {
   survival: 'Survie',
 };
 
+const CHAMP_PALETTE = [
+  '#e74c3c','#3498db','#2ecc71','#f39c12',
+  '#9b59b6','#1abc9c','#e67e22','#ff6b9d',
+  '#00b894','#fd79a8','#6c5ce7','#fdcb6e',
+];
+
+const ARCH_META = {
+  guerrier:   { icon:'⚔️',  desc:'Combattant équilibré' },
+  chasseur:   { icon:'🏹',  desc:'Rapide, mortel à distance' },
+  colosse:    { icon:'🛡️',  desc:'Résistance maximale' },
+  ombre:      { icon:'🌑',  desc:'Camouflage et discrétion' },
+  médecin:    { icon:'💊',  desc:'Récupération et survie' },
+  berserk:    { icon:'💥',  desc:'Attaque sans limite' },
+  rôdeur:     { icon:'🌿',  desc:'Maître du terrain' },
+};
+
 export default function ChampionScreen() {
   const { champion, setChampion, user } = useGame();
   const [weeklyBatch, setWeeklyBatch] = useState([]);
@@ -67,6 +83,13 @@ export default function ChampionScreen() {
     } catch {}
   }
 
+  async function changeColor(color) {
+    try {
+      await api.patch(`/api/champions/${champion.id}/color`, { color });
+      setChampion({ ...champion, color });
+    } catch {}
+  }
+
   if (!champion) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -111,8 +134,51 @@ export default function ChampionScreen() {
     );
   }
 
+  const archMeta = ARCH_META[champion.archetype] || { icon: '⚔️', desc: '' };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* Bandeau identité champion */}
+      <View style={[styles.champBanner, { borderLeftColor: champion.color || '#e2b96f' }]}>
+        <Text style={styles.champBannerIcon}>{archMeta.icon}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.champBannerName}>{champion.name}</Text>
+          <Text style={styles.champBannerArch}>{champion.archetype?.toUpperCase()} · {archMeta.desc}</Text>
+        </View>
+        <View style={styles.champBadges}>
+          <View style={styles.champBadge}>
+            <Text style={styles.champBadgeVal}>{champion.victories || 0}</Text>
+            <Text style={styles.champBadgeLbl}>Victoires</Text>
+          </View>
+          <View style={styles.champBadge}>
+            <Text style={styles.champBadgeVal}>{champion.battles || 0}</Text>
+            <Text style={styles.champBadgeLbl}>Batailles</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* HP max calculé */}
+      <View style={styles.hpBanner}>
+        <Text style={styles.hpLabel}>❤️  {100 + (champion.stats?.endurance || 0) * 10} HP MAX</Text>
+      </View>
+
+      {/* Couleur du champion */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>COULEUR</Text>
+        <View style={styles.colorRow}>
+          {CHAMP_PALETTE.map(c => (
+            <TouchableOpacity
+              key={c} onPress={() => changeColor(c)}
+              style={[
+                styles.colorDot,
+                { backgroundColor: c },
+                champion.color === c && styles.colorDotActive,
+              ]}
+            />
+          ))}
+        </View>
+      </View>
+
       {/* Modèle 3D */}
       <ChampionModel stats={champion.stats} name={champion.name} archetype={champion.archetype} />
 
@@ -178,6 +244,33 @@ const styles = StyleSheet.create({
   miniStat: { alignItems: 'center', minWidth: 36 },
   miniStatVal: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   miniStatLabel: { color: '#555', fontSize: 9 },
+
+  champBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#111122', borderRadius: 12, padding: 14,
+    marginBottom: 10, borderLeftWidth: 4,
+  },
+  champBannerIcon: { fontSize: 28 },
+  champBannerName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  champBannerArch: { color: '#666', fontSize: 11, marginTop: 2 },
+  champBadges:     { flexDirection: 'row', gap: 8 },
+  champBadge:      { alignItems: 'center', minWidth: 48 },
+  champBadgeVal:   { color: '#e2b96f', fontSize: 18, fontWeight: 'bold' },
+  champBadgeLbl:   { color: '#555', fontSize: 9 },
+
+  hpBanner: {
+    backgroundColor: '#111122', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14,
+    marginBottom: 16, alignItems: 'center',
+    borderWidth: 1, borderColor: '#2ecc7133',
+  },
+  hpLabel: { color: '#2ecc71', fontSize: 13, fontWeight: 'bold' },
+
+  colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  colorDot: {
+    width: 30, height: 30, borderRadius: 15,
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  colorDotActive: { borderColor: '#fff', transform: [{ scale: 1.2 }] },
 
   chartSection: { alignItems: 'center', marginBottom: 24 },
   section: { marginBottom: 24 },

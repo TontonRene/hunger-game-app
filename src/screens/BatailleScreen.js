@@ -4,12 +4,45 @@ import { useGame } from '../context/GameContext';
 import BattleMap from '../components/BattleMap';
 import api from '../utils/api';
 
+const ALL_SUPPLIES = [
+  { type:'soin',        icon:'🧪', label:'Soins',      price:50,  color:'#2ecc71' },
+  { type:'festin',      icon:'🍖', label:'Festin',     price:100, color:'#27ae60' },
+  { type:'force',       icon:'🔥', label:'Force',      price:80,  color:'#e74c3c' },
+  { type:'vitesse',     icon:'🌀', label:'Vitesse',    price:80,  color:'#3498db' },
+  { type:'armure',      icon:'🛡️', label:'Armure',     price:90,  color:'#f39c12' },
+  { type:'adrenaline',  icon:'💉', label:'Adrénaline', price:120, color:'#9b59b6' },
+  { type:'antidote',    icon:'💊', label:'Antidote',   price:70,  color:'#1abc9c' },
+  { type:'camouflage',  icon:'🌑', label:'Camouflage', price:110, color:'#636e72' },
+  { type:'carte',       icon:'🗺️', label:'Carte',      price:90,  color:'#e17055' },
+  { type:'arbalete',    icon:'🏹', label:'Arbalète',   price:130, color:'#d35400' },
+];
+
 const ADMIN = 'GameMaster';
 
 export default function BatailleScreen() {
-  const { battleState, battleId, setBattleId, champion, sendSupply, user } = useGame();
+  const { battleState, battleId, setBattleId, champion, sendSupply, user, setUser } = useGame();
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [sendingSupply, setSendingSupply] = useState(null); // type en cours d'envoi
+
+  const gold = user?.gold ?? 0;
+
+  async function buyColis(supplyType, price) {
+    if (!user || !champion) return;
+    if (gold < price) return Alert.alert('Or insuffisant', `Il te faut ${price} 🪙`);
+    try {
+      setSendingSupply(supplyType);
+      const res = await api.post('/api/shop/buy', {
+        username: user.username, itemId: `supply_${supplyType}`,
+      });
+      setUser(u => ({ ...u, gold: res.data.newGold }));
+      sendSupply(champion.id, supplyType);
+    } catch (e) {
+      Alert.alert('Erreur', e.response?.data?.error || 'Envoi impossible');
+    } finally {
+      setSendingSupply(null);
+    }
+  }
 
   const isAdmin = user?.username === ADMIN;
 
@@ -158,22 +191,36 @@ export default function BatailleScreen() {
       {/* Colis si champion vivant */}
       {isAlive && champion && (
         <View style={styles.supplies}>
-          <Text style={styles.suppliesLabel}>Envoyer un colis</Text>
-          <View style={styles.suppliesRow}>
-            {[
-              { type: 'soin', label: '🧪 Soin', color: '#2ecc71' },
-              { type: 'force', label: '💪 Force', color: '#e74c3c' },
-              { type: 'vitesse', label: '⚡ Vitesse', color: '#3498db' },
-            ].map(s => (
-              <TouchableOpacity
-                key={s.type}
-                style={[styles.supplyBtn, { borderColor: s.color + '66' }]}
-                onPress={() => sendSupply(champion.id, s.type)}
-              >
-                <Text style={[styles.supplyBtnText, { color: s.color }]}>{s.label}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.suppliesHeader}>
+            <Text style={styles.suppliesLabel}>Envoyer un colis</Text>
+            <Text style={styles.goldBadge}>🪙 {gold}</Text>
           </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.suppliesRow}>
+            {ALL_SUPPLIES.map(s => {
+              const canAfford = gold >= s.price;
+              const isSending = sendingSupply === s.type;
+              return (
+                <TouchableOpacity
+                  key={s.type}
+                  style={[styles.supplyBtn, { borderColor: s.color + (canAfford ? '99' : '33') }]}
+                  onPress={() => buyColis(s.type, s.price)}
+                  disabled={!canAfford || !!sendingSupply}
+                  activeOpacity={0.7}
+                >
+                  {isSending
+                    ? <ActivityIndicator size="small" color={s.color} />
+                    : <Text style={styles.supplyBtnIcon}>{s.icon}</Text>}
+                  <Text style={[styles.supplyBtnLabel, { color: canAfford ? s.color : '#444' }]}>
+                    {s.label}
+                  </Text>
+                  <Text style={[styles.supplyBtnPrice, { color: canAfford ? '#e2b96f' : '#333' }]}>
+                    🪙{s.price}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
       )}
 
@@ -225,15 +272,20 @@ const styles = StyleSheet.create({
   statChipVal: { color: '#e2b96f', fontSize: 14, fontWeight: 'bold' },
   statChipLabel: { color: '#555', fontSize: 10, marginTop: 1 },
 
-  supplies: { backgroundColor: '#111122', paddingHorizontal: 12, paddingVertical: 8 },
-  suppliesLabel: { color: '#444', fontSize: 10, marginBottom: 6 },
-  suppliesRow: { flexDirection: 'row', gap: 8 },
+  supplies: { backgroundColor: '#111122', paddingVertical: 8 },
+  suppliesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, marginBottom: 6 },
+  suppliesLabel: { color: '#444', fontSize: 10 },
+  goldBadge: { color: '#e2b96f', fontSize: 12, fontWeight: 'bold' },
+  suppliesRow: { paddingHorizontal: 12, gap: 8 },
   supplyBtn: {
-    flex: 1, backgroundColor: '#1a1a2e', borderRadius: 8,
-    paddingVertical: 8, alignItems: 'center',
+    backgroundColor: '#1a1a2e', borderRadius: 10,
+    paddingVertical: 8, paddingHorizontal: 10,
+    alignItems: 'center', width: 72,
     borderWidth: 1,
   },
-  supplyBtnText: { fontSize: 12, fontWeight: 'bold' },
+  supplyBtnIcon:  { fontSize: 20, marginBottom: 2 },
+  supplyBtnLabel: { fontSize: 10, fontWeight: '600', marginBottom: 2 },
+  supplyBtnPrice: { fontSize: 9 },
 
   eventsContainer: { backgroundColor: '#0a0a14', borderTopWidth: 1, borderTopColor: '#1a1a2e' },
   eventsHeader: { color: '#333', fontSize: 9, letterSpacing: 1.5, paddingHorizontal: 10, paddingTop: 5 },

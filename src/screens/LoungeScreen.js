@@ -285,6 +285,7 @@ export default function LoungeScreen() {
   const { champion, user } = useGame();
   const [victories, setVictories]   = useState([]);
   const [loadingV,  setLoadingV]    = useState(false);
+  const [globalStats, setGlobalStats] = useState(null);
 
   // Charge les victoires depuis le backend à chaque fois que l'écran est actif
   useEffect(() => {
@@ -295,6 +296,13 @@ export default function LoungeScreen() {
       .catch(() => {})
       .finally(() => setLoadingV(false));
   }, [user?.username]);
+
+  // Statistiques globales du royaume
+  useEffect(() => {
+    api.get('/api/battle/stats')
+      .then(res => setGlobalStats(res.data))
+      .catch(() => {});
+  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -373,6 +381,47 @@ export default function LoungeScreen() {
         ))
       )}
 
+      {/* Statistiques du royaume */}
+      {globalStats && (
+        <View style={styles.globalSection}>
+          <Text style={styles.sectionTitle}>STATISTIQUES DU ROYAUME</Text>
+          <View style={styles.globalGrid}>
+            <View style={styles.globalCell}>
+              <Text style={styles.globalVal}>{globalStats.totalBattles}</Text>
+              <Text style={styles.globalLbl}>Batailles totales</Text>
+            </View>
+            <View style={styles.globalCell}>
+              <Text style={styles.globalVal}>{globalStats.totalSponsors}</Text>
+              <Text style={styles.globalLbl}>Sponsors</Text>
+            </View>
+            <View style={styles.globalCell}>
+              <Text style={styles.globalVal}>{globalStats.totalVictories}</Text>
+              <Text style={styles.globalLbl}>Victoires enregistrées</Text>
+            </View>
+          </View>
+          {globalStats.topKiller && (
+            <View style={styles.globalHighlight}>
+              <Text style={styles.globalHighlightIcon}>💀</Text>
+              <View>
+                <Text style={styles.globalHighlightTitle}>Champion le plus meurtrier</Text>
+                <Text style={styles.globalHighlightVal}>
+                  {globalStats.topKiller.name} — {globalStats.topKiller.kills} kills
+                </Text>
+              </View>
+            </View>
+          )}
+          {globalStats.topBiome && (
+            <View style={styles.globalHighlight}>
+              <Text style={styles.globalHighlightIcon}>🗺️</Text>
+              <View>
+                <Text style={styles.globalHighlightTitle}>Biome le plus mortel</Text>
+                <Text style={styles.globalHighlightVal}>{globalStats.topBiome}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
       <View style={styles.quote}>
         <Text style={styles.quoteText}>"Seul le dernier en vie écrit l'histoire."</Text>
       </View>
@@ -426,6 +475,23 @@ const styles = StyleSheet.create({
   emptyIcon:  { fontSize: 48, marginBottom: 12 },
   emptyTitle: { color: '#e2b96f', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   emptySub:   { color: '#555', fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+
+  globalSection: { marginHorizontal: 16, marginTop: 8, marginBottom: 8 },
+  globalGrid: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  globalCell: {
+    flex: 1, backgroundColor: '#111122', borderRadius: 10, padding: 12, alignItems: 'center',
+    borderWidth: 1, borderColor: '#1a1a2e',
+  },
+  globalVal: { color: '#e2b96f', fontSize: 20, fontWeight: 'bold' },
+  globalLbl: { color: '#555', fontSize: 9, marginTop: 3, textAlign: 'center' },
+  globalHighlight: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#111122', borderRadius: 10, padding: 12, marginBottom: 8,
+    borderWidth: 1, borderColor: '#1a1a2e',
+  },
+  globalHighlightIcon:  { fontSize: 22 },
+  globalHighlightTitle: { color: '#666', fontSize: 10, marginBottom: 2 },
+  globalHighlightVal:   { color: '#fff', fontSize: 14, fontWeight: 'bold' },
 
   quote: { marginTop: 32, paddingHorizontal: 16, paddingVertical: 20, alignItems: 'center' },
   quoteText: { color: '#333', fontSize: 13, fontStyle: 'italic', textAlign: 'center' },

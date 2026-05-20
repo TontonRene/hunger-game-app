@@ -90,6 +90,33 @@ export default function ChampionScreen() {
     } catch {}
   }
 
+  // ── Champion mort : écran de deuil + possibilité de recruter ─────────────
+  if (champion && champion.status === 'dead') {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.deathBanner}>
+          <Text style={styles.deathSkull}>💀</Text>
+          <Text style={styles.deathTitle}>{champion.name} est tombé</Text>
+          <Text style={styles.deathSub}>
+            {champion.battles || 0} batailles · {champion.victories || 0} victoires
+          </Text>
+        </View>
+        <View style={styles.deathCard}>
+          <Text style={styles.deathMsg}>
+            Ton champion est mort au combat. Son histoire est gravée dans le Valhalla.
+            Tu peux maintenant recruter un nouveau combattant dans le batch de la semaine.
+          </Text>
+          <TouchableOpacity
+            style={styles.saveBtn}
+            onPress={() => { setChampion(null); loadWeeklyBatch(); }}
+          >
+            <Text style={styles.saveBtnText}>⚔️ Recruter un nouveau champion</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  }
+
   if (!champion) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -264,6 +291,19 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2ecc7133',
   },
   hpLabel: { color: '#2ecc71', fontSize: 13, fontWeight: 'bold' },
+
+  deathBanner: {
+    alignItems: 'center', marginBottom: 20,
+    paddingVertical: 24,
+  },
+  deathSkull:  { fontSize: 56, marginBottom: 12 },
+  deathTitle:  { color: '#e74c3c', fontSize: 22, fontWeight: 'bold' },
+  deathSub:    { color: '#555', fontSize: 12, marginTop: 6 },
+  deathCard:   {
+    backgroundColor: '#111122', borderRadius: 14, padding: 20,
+    borderWidth: 1, borderColor: '#e74c3c33',
+  },
+  deathMsg:    { color: '#888', fontSize: 13, lineHeight: 22, marginBottom: 20 },
 
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   colorDot: {

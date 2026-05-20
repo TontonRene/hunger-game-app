@@ -30,13 +30,13 @@ const POI_COLORS = {
 
 const WORLD = 300;
 
-// ── Couleur de terrain par biome ─────────────────────────────────────────
+// ── Couleur de terrain par biome (enrichi SoC) ───────────────────────────
 const BIOME_COLORS = {
-  'forêt':    { base:'#1a3a1a', accent:'#2d5a27' },
-  'désert':   { base:'#5a4a1a', accent:'#8a7a2a' },
-  'toundra':  { base:'#2a3a4a', accent:'#4a6a7a' },
-  'marais':   { base:'#1a2a1a', accent:'#2a4a2a' },
-  'montagne': { base:'#2a2a3a', accent:'#4a4a5a' },
+  'forêt':    { base:'#081408', mid:'#102010', accent:'#2a5220', edge:'#041004', glow:'#1a5a14' },
+  'désert':   { base:'#1e1208', mid:'#2e1c0a', accent:'#6e5e18', edge:'#110a04', glow:'#7a5c10' },
+  'toundra':  { base:'#080e18', mid:'#10182a', accent:'#1e3e5e', edge:'#04080e', glow:'#143060' },
+  'marais':   { base:'#060e06', mid:'#0c160c', accent:'#1e401e', edge:'#030603', glow:'#144414' },
+  'montagne': { base:'#0a0a12', mid:'#10101c', accent:'#30304e', edge:'#05050a', glow:'#202050' },
 };
 
 // ── Terrain décoratif (procédural, seedé par biome) ──────────────────────
@@ -74,6 +74,36 @@ const STARS = Array.from({length:120},()=>({
   fx:Math.random(), fy:Math.random(),
   r:Math.random()*1.2+0.3, tw:Math.random()*Math.PI*2,
 }));
+
+// ── Système de particules ─────────────────────────────────────────────────
+// Chaque particule : {x, y, vx, vy, life, decay, r, color, gravity}
+// Toutes les coordonnées sont en espace MONDE (0-300), converties lors du draw
+function spawnParticles(pool, wx, wy, type, color) {
+  const cfgs = {
+    combat: { n:6,  spd:[50,120], lt:[0.35,0.65], r:[0.8,2.2], grav:20,  cols:[color,'#ff8844','#ffdd44'] },
+    death:  { n:10, spd:[15,65],  lt:[0.7,1.6],  r:[0.7,2.8], grav:55,  cols:['#888','#555','#aaa','#ccc'] },
+    heal:   { n:5,  spd:[8,25],   lt:[0.5,1.0],  r:[0.8,1.8], grav:-35, cols:['#2ecc71','#27ae60','#a8ffc8'] },
+    supply: { n:4,  spd:[12,35],  lt:[0.5,1.1],  r:[1.0,2.5], grav:0,   cols:[color,'#ffffff','#e2b96f'] },
+  };
+  const cfg = cfgs[type] || cfgs.combat;
+  const slots = 42 - pool.length;
+  const n = Math.min(cfg.n, slots);
+  for (let i = 0; i < n; i++) {
+    const ang  = Math.random() * Math.PI * 2;
+    const spd  = cfg.spd[0] + Math.random() * (cfg.spd[1] - cfg.spd[0]);
+    const life = cfg.lt[0]  + Math.random() * (cfg.lt[1]  - cfg.lt[0]);
+    pool.push({
+      x:wx, y:wy,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      life: 1.0,
+      decay: 1.0 / life,
+      r: cfg.r[0] + Math.random() * (cfg.r[1] - cfg.r[0]),
+      color: cfg.cols[Math.floor(Math.random() * cfg.cols.length)],
+      gravity: cfg.grav,
+    });
+  }
+}
 
 // ── Paint pool (lazy init) ────────────────────────────────────────────────
 // Skia copie l'état du paint dans le PictureRecorder au moment du draw,
@@ -127,13 +157,31 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
   const dayFrac = isNight?1:isDusk?(phase-15)/3:0;
   const ox=W/2-cx*z, oy=H/2-cy*z, wPx=WORLD*z;
 
-  // Fond
-  canvas.drawColor(Skia.Color(isNight?'#04050e':'#0a0a18'));
+  // Fond (plus profond, navy/indigo)
+  canvas.drawColor(Skia.Color(isNight?'#02030a':'#05060f'));
 
-  // Terrain (couleur solide par biome)
+  // Terrain — couches pour profondeur SoC
   const bc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
   canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkFill(bc.base));
-  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.1,oy+wPx*0.1,wPx*0.8,wPx*0.8), mkAlpha(bc.accent,0.4));
+  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.08,oy+wPx*0.08,wPx*0.84,wPx*0.84), mkAlpha(bc.mid,0.55));
+  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.2,oy+wPx*0.2,wPx*0.6,wPx*0.6), mkAlpha(bc.accent,0.22));
+  // Bordure intérieure lumineuse (rim glow du biome)
+  canvas.drawRect(Skia.XYWHRect(ox+2,oy+2,wPx-4,wPx-4), mkStrokeA(bc.glow||bc.accent,2,0.20));
+  // Points de texture (grille sparse, seulement à fort zoom)
+  if(z > 1.3) {
+    const gs = 30;
+    const x0 = Math.floor((cx - W/(2*z))/gs)*gs;
+    const y0 = Math.floor((cy - H/(2*z))/gs)*gs;
+    const x1 = cx + W/(2*z) + gs;
+    const y1 = cy + H/(2*z) + gs;
+    for(let gx=x0; gx<x1; gx+=gs) {
+      for(let gy=y0; gy<y1; gy+=gs) {
+        if(gx<0||gx>WORLD||gy<0||gy>WORLD) continue;
+        const dpx=W/2+(gx-cx)*z, dpy=H/2+(gy-cy)*z;
+        canvas.drawCircle(dpx,dpy,1.1,mkAlpha(bc.accent,0.18));
+      }
+    }
+  }
 
   // Terrain décorations (rochers et buissons, seeded par biome)
   const decor = genTerrainDecor(v.biome);
@@ -202,21 +250,27 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
     canvas.drawCircle(sx,sy,rpx,rp);
   });
 
-  // Zone (donut EvenOdd)
+  // Zone (donut + glow multi-anneaux SoC)
   const zone=v.zone;
   if(zone){
     const zcx=W/2+(zone.cx-cx)*z, zcy=H/2+(zone.cy-cy)*z;
     const rpx=zone.radius*z;
+    // Tint extérieur (zone mortelle — teinte pourpre profonde)
     const zonePath=Skia.Path.Make();
     zonePath.addRect(Skia.XYWHRect(0,0,W,H));
     zonePath.addCircle(zcx,zcy,rpx);
     zonePath.setFillType(FillType.EvenOdd);
-    canvas.drawPath(zonePath,mkAlpha(isNight?'#b40000':'#c80000',isNight?0.22:0.14));
+    canvas.drawPath(zonePath,mkAlpha('#0a0020',isNight?0.55:0.40));
+    // Glow externe progressif (3 halos)
     const pulse=0.5+Math.sin(t*3.5)*0.3;
-    const rp=mkStroke('#ff3c3c',2.5);
-    rp.setAlphaf(pulse);
-    rp.setPathEffect(_dashZone);
-    canvas.drawCircle(zcx,zcy,rpx,rp);
+    canvas.drawCircle(zcx,zcy,rpx+14*z*0.3,mkAlpha('#ff0040',0.04*pulse));
+    canvas.drawCircle(zcx,zcy,rpx+7*z*0.3, mkAlpha('#ff2050',0.08*pulse));
+    canvas.drawCircle(zcx,zcy,rpx+3*z*0.3, mkAlpha('#ff3c3c',0.14*pulse));
+    // Anneau principal animé
+    const zp=mkStroke('#ff3c3c',2.5); zp.setAlphaf(0.7+pulse*0.3); zp.setPathEffect(_dashZone);
+    canvas.drawCircle(zcx,zcy,rpx,zp);
+    // Glow intérieur (bord chaud)
+    canvas.drawCircle(zcx,zcy,rpx-4*z*0.3,mkAlpha('#ff8800',0.10*pulse));
   }
 
   // Lignes d'alliance
@@ -289,28 +343,46 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
       return;
     }
 
-    const baseA=cv.hasCamo?0.35:1.0;
+    const baseA=cv.hasCamo?0.30:1.0;
 
-    // Ombre
-    canvas.drawCircle(sx,sy+r*.55,r*.65,mkAlpha('#000000',0.28*baseA));
+    // ── Auras de glow (style SoC : 3 couches concentriques) ──────────────
+    if(!cv.isDead) {
+      const glowPulse = cv.combatFlash > 0 ? 1.4 : 1.0;
+      canvas.drawCircle(sx,sy,r*5.5, mkAlpha(cv.color, 0.038*baseA*glowPulse));
+      canvas.drawCircle(sx,sy,r*3.2, mkAlpha(cv.color, 0.10*baseA*glowPulse));
+      canvas.drawCircle(sx,sy,r*1.9, mkAlpha(cv.color, 0.22*baseA*glowPulse));
+    }
 
-    // Flash combat
-    if(cv.combatFlash>0)
-      canvas.drawCircle(sx,sy,r*2.5,mkAlpha('#ff4444',cv.combatFlash*0.38));
+    // Ombre portée
+    canvas.drawCircle(sx,sy+r*.60,r*.70,mkAlpha('#000000',0.32*baseA));
 
-    // Ring
+    // Flash combat (impact lumineux)
+    if(cv.combatFlash>0) {
+      canvas.drawCircle(sx,sy,r*4, mkAlpha('#ffffff', cv.combatFlash*0.10));
+      canvas.drawCircle(sx,sy,r*2.5,mkAlpha('#ff6644',cv.combatFlash*0.45));
+    }
+
+    // Ring (rim light SoC : anneau fin très lumineux)
     const isFollowed=v.followId===cv.id;
-    const ringCol=isFollowed?'#e2b96f':cv.combatFlash>0?'#ff2222':cv.color;
-    const ringW  =isFollowed?2.8:cv.combatFlash>0?3:1.5;
-    const ringA  =(isFollowed||cv.combatFlash>0?1.0:0.55)*baseA;
-    canvas.drawCircle(sx,sy,r+2.5,mkStrokeA(ringCol,ringW,ringA));
+    const ringCol=isFollowed?'#ffffff':cv.combatFlash>0?'#ff4444':cv.color;
+    const ringW  =isFollowed?3.2:cv.combatFlash>0?2.8:1.8;
+    const ringA  =(isFollowed||cv.combatFlash>0?1.0:0.65)*baseA;
+    canvas.drawCircle(sx,sy,r+2.8,mkStrokeA(ringCol,ringW,ringA));
+    // Inner rim (highlight petit arc intérieur)
+    if(!cv.isDead) canvas.drawCircle(sx,sy,r+0.8,mkStrokeA('#ffffff',1.0,0.18*baseA));
 
-    // Corps
-    canvas.drawCircle(sx,sy,r,mkAlpha(cv.color,baseA));
+    // Corps principal
+    canvas.drawCircle(sx,sy,r,mkAlpha(cv.color,0.92*baseA));
 
-    // Tête (bob)
+    // Inner highlight (sphère 3D SoC : tache lumineuse haut-gauche)
+    if(!cv.isDead) {
+      canvas.drawCircle(sx-r*0.28,sy-r*0.28,r*0.42,mkAlpha('#ffffff',0.22*baseA));
+    }
+
+    // Tête (bob animé) — plus lumineuse
     const bob=Math.sin(t*3+cv.idx)*.5;
-    canvas.drawCircle(sx,sy-r*.22+bob,r*.34,mkAlpha(cv.color,0.75*baseA));
+    canvas.drawCircle(sx,sy-r*.22+bob,r*.32,mkAlpha('#ffffff',0.62*baseA));
+    canvas.drawCircle(sx,sy-r*.22+bob,r*.24,mkAlpha(cv.color,0.88*baseA));
 
     // Statuts
     let seX=sx-r*1.5;
@@ -347,6 +419,17 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
       canvas.drawCircle(sx-r-2,sy+r,3,mkAlpha('#e2b96f',0.8));
     }
   });
+
+  // ── Particules ────────────────────────────────────────────────────────────
+  if(v.particles && v.particles.length > 0) {
+    for(let i=0; i<v.particles.length; i++) {
+      const p=v.particles[i];
+      const px=W/2+(p.x-cx)*z, py=H/2+(p.y-cy)*z;
+      if(px<-8||px>W+8||py<-8||py>H+8) continue;
+      const pr=Math.max(1, p.r * Math.max(0.4, z*0.65));
+      canvas.drawCircle(px,py,pr, mkAlpha(p.color, p.life*0.85));
+    }
+  }
 
   // HUD
   if(fm){
@@ -385,6 +468,18 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
   const vx=mmx+(cx-W/(2*z))*sc, vy=mmy+(cy-H/(2*z))*sc;
   canvas.drawRect(Skia.XYWHRect(vx,vy,vw,vh),mkStrokeA('#ffffff',1,0.45));
   canvas.drawRect(Skia.XYWHRect(mmx-1,mmy-1,MM+2,MM+2),mkStrokeA('#ffffff',1,0.22));
+
+  // ── Vignette SoC (bords obscurcis en 6 couches pour falloff doux) ────────
+  const vSteps=6;
+  for(let i=0;i<vSteps;i++){
+    const t2=i/vSteps;                          // 0=bord extrême, 1=presque centre
+    const margin=t2*Math.min(W,H)*0.40;
+    const a=0.20*(1-t2)*(1-t2);                // décroissance quadratique
+    canvas.drawRect(Skia.XYWHRect(0,0,W,margin+1),            mkAlpha('#000000',a)); // haut
+    canvas.drawRect(Skia.XYWHRect(0,H-margin-1,W,margin+1),   mkAlpha('#000000',a)); // bas
+    canvas.drawRect(Skia.XYWHRect(0,0,margin+1,H),            mkAlpha('#000000',a*0.8)); // gauche
+    canvas.drawRect(Skia.XYWHRect(W-margin-1,0,margin+1,H),   mkAlpha('#000000',a*0.8)); // droite
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -411,6 +506,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
     champions:[], zone:{cx:150,cy:150,radius:185},
     alliances:[], activeEvent:null, dayPhase:0, tick:0,
     traps:[], supplies:[], pois:[], biome:'forêt', followId:null,
+    particles:[], pendingSpawns:[],
   });
 
   // ── Caméra POV : état du champion suivi ─────────────────────────────────
@@ -462,6 +558,21 @@ export default function BattleMap({ battleState, onChampionTap }) {
           camX.current=c.x; camY.current=c.y;
         }
       }
+
+      // ── Spawn + update particules ─────────────────────────────────────────
+      if(gvisRef.current.pendingSpawns.length > 0) {
+        gvisRef.current.pendingSpawns.forEach(s => {
+          spawnParticles(gvisRef.current.particles, s.x, s.y, s.type, s.color);
+        });
+        gvisRef.current.pendingSpawns = [];
+      }
+      const dtSec = delta/1000;
+      gvisRef.current.particles = gvisRef.current.particles.filter(p => {
+        p.x += p.vx * dtSec; p.y += p.vy * dtSec;
+        p.vy += (p.gravity||0) * dtSec;
+        p.life -= p.decay * dtSec;
+        return p.life > 0;
+      });
 
       // Interpolation linéaire basée sur le temps réel depuis le dernier tick
       // alpha=0 au tick, alpha=1 au tick suivant → mouvement continu sur toute la durée
@@ -532,11 +643,27 @@ export default function BattleMap({ battleState, onChampionTap }) {
         inAlliance:(battleState.alliances||[]).some(al=>al.ids.includes(c.id)),
       };
     });
+    // Flash combat + spawns particules
+    const spawns = [];
+    const prevMap2 = new Map((gvisRef.current.champions||[]).map(cv=>[cv.id,cv]));
+    champs.forEach(cv => {
+      const ex2 = prevMap2.get(cv.id);
+      if(ex2 && !ex2.isDead && cv.isDead) {
+        // Mort : burst de cendres
+        spawns.push({ x:cv.tx, y:cv.ty, type:'death', color:cv.color });
+      }
+    });
     (battleState.events||[]).slice(-20).forEach(ev=>{
       if(ev.type==='combat')[ev.a,ev.b].forEach(id=>{
-        const cv=champs.find(c=>c.id===id); if(cv) cv.combatFlash=0.75;
+        const cv=champs.find(c=>c.id===id);
+        if(cv){ cv.combatFlash=0.75; spawns.push({x:cv.tx,y:cv.ty,type:'combat',color:cv.color}); }
       });
+      if(ev.type==='collect'){
+        const cv=champs.find(c=>c.id===ev.champion);
+        if(cv) spawns.push({x:cv.tx,y:cv.ty,type:'heal',color:cv.color});
+      }
     });
+    gvisRef.current.pendingSpawns = spawns;
 
     // Zone → mise à l'échelle
     const rawZone = battleState.map?.zone;
@@ -556,6 +683,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
       pois:    (battleState.map?.pois    ||[]).map(p=>({...p,x:p.x*scaleX,y:p.y*scaleY})),
       biome:    battleState.map?.biome||'forêt',
       followId: gvisRef.current.followId,
+      particles: gvisRef.current.particles || [],
+      pendingSpawns: spawns,
     };
   },[battleState]);
 

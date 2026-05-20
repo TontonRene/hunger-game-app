@@ -1,7 +1,8 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useGame } from '../context/GameContext';
+import api from '../utils/api';
 
 // ── Valhalla 3D scene HTML ────────────────────────────────────────────────
 const VALHALLA_HTML = `<!DOCTYPE html>
@@ -282,7 +283,18 @@ animate();
 // ── Screen ────────────────────────────────────────────────────────────────
 export default function LoungeScreen() {
   const { champion, user } = useGame();
-  const victories = []; // TODO: charger depuis Firestore
+  const [victories, setVictories]   = useState([]);
+  const [loadingV,  setLoadingV]    = useState(false);
+
+  // Charge les victoires depuis le backend à chaque fois que l'écran est actif
+  useEffect(() => {
+    if (!user?.username) return;
+    setLoadingV(true);
+    api.get(`/api/battle/victories/${user.username}`)
+      .then(res => setVictories(res.data.victories || []))
+      .catch(() => {})
+      .finally(() => setLoadingV(false));
+  }, [user?.username]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -325,8 +337,11 @@ export default function LoungeScreen() {
       )}
 
       {/* Tableau */}
-      <Text style={styles.sectionTitle}>TABLEAU DE GLOIRE</Text>
-      {victories.length === 0 ? (
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionTitle}>TABLEAU DE GLOIRE</Text>
+        {loadingV && <ActivityIndicator size="small" color="#e2b96f" style={{ marginRight: 16 }} />}
+      </View>
+      {victories.length === 0 && !loadingV ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🪓</Text>
           <Text style={styles.emptyTitle}>Le banquet attend ses héros</Text>
@@ -337,7 +352,7 @@ export default function LoungeScreen() {
           </Text>
         </View>
       ) : (
-        victories.map((v, i) => (
+        [...victories].reverse().map((v, i) => (
           <View key={v.id} style={styles.victoryCard}>
             <View style={styles.medal}>
               <Text style={styles.medalText}>#{i + 1}</Text>
@@ -389,7 +404,8 @@ const styles = StyleSheet.create({
   sponsorStatLabel: { color: '#555', fontSize: 11, marginTop: 4 },
   divider:          { width: 1, backgroundColor: '#2a2a4a', marginHorizontal: 8 },
 
-  sectionTitle: { color: '#555', fontSize: 11, letterSpacing: 2, marginTop: 24, marginBottom: 12, marginHorizontal: 16 },
+  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 12 },
+  sectionTitle: { color: '#555', fontSize: 11, letterSpacing: 2, marginHorizontal: 16 },
 
   victoryCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

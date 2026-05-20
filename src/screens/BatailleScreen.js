@@ -53,8 +53,26 @@ export default function BatailleScreen() {
   const alive = battleState?.champions?.filter(c => c.hp > 0) || [];
   const myChamp = battleState?.champions?.find(c => c.id === champion?.id);
   const isAlive = myChamp && myChamp.hp > 0;
-  const recentEvents = battleState?.events?.slice(-6).reverse() || [];
+  const recentEvents = battleState?.events?.slice(-10).reverse() || [];
   const isFinished = battleState?.status === 'finished';
+
+  function eventStyle(e) {
+    if (e.type === 'death')   return styles.eventDeath;
+    if (e.type === 'combat')  return styles.eventCombat;
+    if (e.type === 'collect') return styles.eventCollect;
+    return styles.eventText;
+  }
+  function eventLabel(e) {
+    if (e.type === 'death')
+      return `💀  ${e.name || e.champion} éliminé par ${e.killedByName || e.killedBy}`;
+    if (e.type === 'combat')
+      return `⚔️  ${e.aName || e.a} vs ${e.bName || e.b}  (${e.dmgA ?? '?'}/${e.dmgB ?? '?'} dmg)`;
+    if (e.type === 'collect')
+      return `📦  ${e.name || e.champion} récupère ${e.supply}`;
+    if (e.type === 'narr')
+      return `📜  ${e.text || ''}`;
+    return `⚡  ${e.type}`;
+  }
 
   if (checking) return (
     <View style={styles.center}>
@@ -161,19 +179,18 @@ export default function BatailleScreen() {
 
       {/* Événements récents */}
       {recentEvents.length > 0 && (
-        <ScrollView style={styles.events} contentContainerStyle={{ padding: 10 }}>
-          {recentEvents.map((e, i) => (
-            <Text key={i} style={styles.eventText}>
-              {e.type === 'death'
-                ? `💀 ${e.name || e.champion} éliminé par ${e.killedByName || e.killedBy}`
-                : e.type === 'combat'
-                ? `⚔️ ${e.aName || e.a} vs ${e.bName || e.b}`
-                : e.type === 'collect'
-                ? `📦 ${e.name || e.champion} récupère un colis (${e.supply})`
-                : `⚔️ Combat`}
-            </Text>
-          ))}
-        </ScrollView>
+        <View style={styles.eventsContainer}>
+          <Text style={styles.eventsHeader}>
+            JOURNAL  ·  Tick {battleState?.tick || 0}  ·  {alive.length} vivants
+          </Text>
+          <ScrollView style={styles.events} contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+            {recentEvents.map((e, i) => (
+              <Text key={i} style={eventStyle(e)} numberOfLines={2}>
+                {eventLabel(e)}
+              </Text>
+            ))}
+          </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -218,6 +235,11 @@ const styles = StyleSheet.create({
   },
   supplyBtnText: { fontSize: 12, fontWeight: 'bold' },
 
-  events: { maxHeight: 80, backgroundColor: '#0a0a14' },
-  eventText: { color: '#555', fontSize: 11, marginBottom: 2 },
+  eventsContainer: { backgroundColor: '#0a0a14', borderTopWidth: 1, borderTopColor: '#1a1a2e' },
+  eventsHeader: { color: '#333', fontSize: 9, letterSpacing: 1.5, paddingHorizontal: 10, paddingTop: 5 },
+  events: { maxHeight: 130 },
+  eventText:    { color: '#666', fontSize: 11, marginBottom: 3, lineHeight: 16 },
+  eventDeath:   { color: '#c0392b', fontSize: 11, marginBottom: 3, fontWeight: '600', lineHeight: 16 },
+  eventCombat:  { color: '#e67e22', fontSize: 11, marginBottom: 3, lineHeight: 16 },
+  eventCollect: { color: '#27ae60', fontSize: 11, marginBottom: 3, lineHeight: 16 },
 });

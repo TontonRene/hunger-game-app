@@ -4,7 +4,7 @@
  * Compatible Expo Go SDK 54.
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { StyleSheet, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
   PaintStyle, FillType,
@@ -38,6 +38,36 @@ const BIOME_COLORS = {
   'marais':   { base:'#1a2a1a', accent:'#2a4a2a' },
   'montagne': { base:'#2a2a3a', accent:'#4a4a5a' },
 };
+
+// ── Terrain décoratif (procédural, seedé par biome) ──────────────────────
+function seededRNG(seed) {
+  let h = seed | 0;
+  return () => {
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+    return ((h ^ (h >>> 16)) >>> 0) / 0xffffffff;
+  };
+}
+
+const _TERRAIN_CACHE = {};
+function genTerrainDecor(biome) {
+  if (_TERRAIN_CACHE[biome]) return _TERRAIN_CACHE[biome];
+  const seed = (biome || 'forêt').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  const rng  = seededRNG(seed);
+  const items = [];
+  // 50 rochers + buissons épars sur la carte monde
+  for (let i = 0; i < 50; i++) {
+    items.push({
+      x: rng() * WORLD,
+      y: rng() * WORLD,
+      r: rng() * 5 + 2,
+      type: rng() > 0.45 ? 'rock' : 'bush',
+      a: rng() * 0.18 + 0.06,
+    });
+  }
+  _TERRAIN_CACHE[biome] = items;
+  return items;
+}
 
 // ── Étoiles ───────────────────────────────────────────────────────────────
 const STARS = Array.from({length:120},()=>({
@@ -104,6 +134,24 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
   const bc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
   canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkFill(bc.base));
   canvas.drawRect(Skia.XYWHRect(ox+wPx*0.1,oy+wPx*0.1,wPx*0.8,wPx*0.8), mkAlpha(bc.accent,0.4));
+
+  // Terrain décorations (rochers et buissons, seeded par biome)
+  const decor = genTerrainDecor(v.biome);
+  for(let i=0; i<decor.length; i++){
+    const d = decor[i];
+    const dx = W/2 + (d.x - cx)*z;
+    const dy = H/2 + (d.y - cy)*z;
+    if(dx < -20 || dx > W+20 || dy < -20 || dy > H+20) continue;
+    const dr = Math.max(1.5, d.r * Math.max(0.5, z * 0.6));
+    if(d.type === 'rock'){
+      canvas.drawCircle(dx, dy, dr,        mkAlpha(bc.accent, d.a + 0.12));
+      canvas.drawCircle(dx-dr*.3, dy-dr*.3, dr*.45, mkAlpha('#ffffff', d.a * 0.4));
+    } else {
+      canvas.drawCircle(dx,       dy,       dr*1.5, mkAlpha(bc.accent, d.a));
+      canvas.drawCircle(dx+dr*.5, dy-dr*.3, dr,     mkAlpha(bc.accent, d.a + 0.06));
+      canvas.drawCircle(dx-dr*.4, dy-dr*.2, dr*.9,  mkAlpha(bc.accent, d.a + 0.04));
+    }
+  }
 
   // Overlay nuit
   if(dayFrac>0){
@@ -359,6 +407,25 @@ export default function BattleMap({ battleState, onChampionTap }) {
     traps:[], supplies:[], pois:[], biome:'forêt', followId:null,
   });
 
+  // ── Caméra POV : état du champion suivi ─────────────────────────────────
+  const [followInfo, setFollowInfo] = useState(null); // {id, name, color} | null
+
+  const cycleFollow = useCallback((dir) => {
+    const alive = (gvisRef.current.champions || []).filter(cv => !cv.isDead);
+    if (alive.length === 0) return;
+    const curId = gvisRef.current.followId;
+    let idx = alive.findIndex(cv => cv.id === curId);
+    idx = (idx + dir + alive.length) % alive.length;
+    const target = alive[idx];
+    gvisRef.current.followId = target.id;
+    setFollowInfo({ id: target.id, name: target.name, color: target.color });
+  }, []);
+
+  const clearFollow = useCallback(() => {
+    gvisRef.current.followId = null;
+    setFollowInfo(null);
+  }, []);
+
   // ── Polices (lazy — Skia.Font(null) crash iOS en v2.x) ───────────────────
   const fontSmRef  = useRef(null);
   const fontMidRef = useRef(null);
@@ -417,13 +484,21 @@ export default function BattleMap({ battleState, onChampionTap }) {
   // ── Sync depuis battleState ───────────────────────────────────────────────
   useEffect(()=>{
     if(!battleState) return;
+
+    // Mise à l'échelle : backend = 100×100, simulateur = 300×300
+    const mapW   = battleState.map?.width  || 100;
+    const mapH   = battleState.map?.height || 100;
+    const scaleX = WORLD / mapW;
+    const scaleY = WORLD / mapH;
+
     const prevMap=new Map((gvisRef.current.champions||[]).map(cv=>[cv.id,cv]));
     const champs=(battleState.champions||[]).map((c,i)=>{
       const ex=prevMap.get(c.id);
+      const tx=c.x*scaleX, ty=c.y*scaleY;
       return {
         id:c.id,
-        x:ex?ex.x:c.x, y:ex?ex.y:c.y,
-        tx:c.x, ty:c.y,
+        x:ex?ex.x:tx, y:ex?ex.y:ty,
+        tx, ty,
         hp:c.hp, maxHp:c.maxHp,
         color:c.color||CHAMP_COLORS[i%CHAMP_COLORS.length],
         isDead:c.hp<=0,
@@ -440,16 +515,23 @@ export default function BattleMap({ battleState, onChampionTap }) {
         const cv=champs.find(c=>c.id===id); if(cv) cv.combatFlash=0.75;
       });
     });
+
+    // Zone → mise à l'échelle
+    const rawZone = battleState.map?.zone;
+    const zone = rawZone
+      ? { cx: rawZone.cx*scaleX, cy: rawZone.cy*scaleY, radius: rawZone.radius*scaleX }
+      : { cx: WORLD/2, cy: WORLD/2, radius: 185 };
+
     gvisRef.current={
       champions:champs,
-      zone:     battleState.map?.zone||{cx:150,cy:150,radius:185},
+      zone,
       alliances:battleState.alliances||[],
       activeEvent:battleState.activeEvent||null,
       dayPhase: battleState.dayPhase||0,
       tick:     battleState.tick||0,
-      traps:    battleState.map?.traps||[],
-      supplies: battleState.map?.supplies||[],
-      pois:     battleState.map?.pois||[],
+      traps:   (battleState.map?.traps   ||[]).map(t=>({...t,x:t.x*scaleX,y:t.y*scaleY})),
+      supplies:(battleState.map?.supplies||[]).map(s=>({...s,x:s.x*scaleX,y:s.y*scaleY})),
+      pois:    (battleState.map?.pois    ||[]).map(p=>({...p,x:p.x*scaleX,y:p.y*scaleY})),
       biome:    battleState.map?.biome||'forêt',
       followId: gvisRef.current.followId,
     };
@@ -463,7 +545,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
       if(cv.isDead) continue;
       const sx=W/2+(cv.x-cx2)*z2, sy=H/2+(cv.y-cy2)*z2;
       if(Math.hypot(ex-sx,ey-sy)<Math.max(12,z2*3.5)){
-        gvisRef.current.followId=gvisRef.current.followId===cv.id?null:cv.id;
+        const wasFollowing=gvisRef.current.followId===cv.id;
+        gvisRef.current.followId=wasFollowing?null:cv.id;
+        setFollowInfo(wasFollowing?null:{id:cv.id,name:cv.name,color:cv.color});
         if(onChampionTap) onChampionTap(cv.id);
         return;
       }
@@ -475,6 +559,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
       return;
     }
     gvisRef.current.followId=null;
+    setFollowInfo(null);
   },[W,H,onChampionTap]);
 
   // ── Gestes (JS thread — runOnJS(true)) ───────────────────────────────────
@@ -487,7 +572,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
         W,H,zoom.current
       );
       camX.current=c.x; camY.current=c.y;
-      gvisRef.current.followId=null;
+      if(gvisRef.current.followId){ gvisRef.current.followId=null; setFollowInfo(null); }
     })
     .runOnJS(true);
 
@@ -509,6 +594,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
       zoom.current=baseZoom(W,H);
       camX.current=WORLD/2; camY.current=WORLD/2;
       gvisRef.current.followId=null;
+      setFollowInfo(null);
     })
     .runOnJS(true);
 
@@ -522,10 +608,56 @@ export default function BattleMap({ battleState, onChampionTap }) {
   );
 
   return (
-    <GestureDetector gesture={gesture}>
-      <Canvas style={StyleSheet.absoluteFill}>
-        {picture && <Picture picture={picture}/>}
-      </Canvas>
-    </GestureDetector>
+    <View style={StyleSheet.absoluteFill}>
+      <GestureDetector gesture={gesture}>
+        <Canvas style={StyleSheet.absoluteFill}>
+          {picture && <Picture picture={picture}/>}
+        </Canvas>
+      </GestureDetector>
+
+      {/* Barre caméra POV ← → */}
+      <View style={styles.povBar} pointerEvents="box-none">
+        <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(-1)} activeOpacity={0.75}>
+          <Text style={styles.povBtnTxt}>◀</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.povCenter} onPress={clearFollow} activeOpacity={0.75}>
+          <Text style={styles.povCenterTxt} numberOfLines={1}>
+            {followInfo ? `👁  ${followInfo.name}` : 'Caméra libre'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(1)} activeOpacity={0.75}>
+          <Text style={styles.povBtnTxt}>▶</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  povBar: {
+    position: 'absolute',
+    top: 10, left: 0, right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  povBtn: {
+    backgroundColor: 'rgba(0,0,0,0.60)',
+    borderRadius: 22,
+    width: 36, height: 36,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(226,185,111,0.45)',
+  },
+  povBtnTxt: { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
+  povCenter: {
+    flex: 1, maxWidth: 170,
+    backgroundColor: 'rgba(0,0,0,0.60)',
+    borderRadius: 22,
+    paddingHorizontal: 14, paddingVertical: 7,
+    alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(226,185,111,0.28)',
+  },
+  povCenterTxt: { color: '#e2b96f', fontSize: 11, fontWeight: '600' },
+});

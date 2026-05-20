@@ -54,12 +54,27 @@ export function GameProvider({ children }) {
     else AsyncStorage.removeItem('champion');
   }, [champion]);
 
-  // WebSocket quand une bataille est active
+  // Keep-alive : ping toutes les 8 min pour éviter le cold start Render
+  useEffect(() => {
+    const id = setInterval(() => {
+      api.get('/api/battle/active').catch(() => {});
+    }, 8 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // WebSocket quand une bataille est active (avec reconnexion automatique)
   useEffect(() => {
     if (!battleId || !serverUrl) return;
-    const socket = io(serverUrl, { transports: ['websocket'] });
+    const socket = io(serverUrl, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+    });
     socketRef.current = socket;
-    socket.on('connect', () => socket.emit('join_battle', battleId));
+    // 'connect' se déclenche aussi lors des reconnexions — couvre les deux cas
+    socket.on('connect',      () => socket.emit('join_battle', battleId));
     socket.on('battle_state', (state) => setBattleState(state));
     return () => socket.disconnect();
   }, [battleId, serverUrl]);

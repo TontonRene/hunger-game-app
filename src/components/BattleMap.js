@@ -45,22 +45,39 @@ const STARS = Array.from({length:120},()=>({
   r:Math.random()*1.2+0.3, tw:Math.random()*Math.PI*2,
 }));
 
-// ── Paint helpers (JS thread, pas worklet) ────────────────────────────────
+// ── Paint pool (lazy init) ────────────────────────────────────────────────
+// Skia copie l'état du paint dans le PictureRecorder au moment du draw,
+// donc 4 objets réutilisés par frame = ~0 allocation Paint = GC éliminé.
+let _FP=null,_AP=null,_SP=null,_SAP=null;
+let _dashPOI=null,_dashZone=null,_dashAlliance=null,_dashMm=null;
+const _CC={};  // cache couleur : string → Skia color number
+
+function _initPool(){
+  if(_FP) return;
+  _FP  = Skia.Paint();
+  _AP  = Skia.Paint();
+  _SP  = Skia.Paint(); _SP.setStyle(PaintStyle.Stroke);
+  _SAP = Skia.Paint(); _SAP.setStyle(PaintStyle.Stroke);
+  _dashPOI      = Skia.PathEffect.MakeDash([5,4]);
+  _dashZone     = Skia.PathEffect.MakeDash([7,4]);
+  _dashAlliance = Skia.PathEffect.MakeDash([4,4]);
+  _dashMm       = Skia.PathEffect.MakeDash([3,3]);
+}
+function _c(s){ return _CC[s]||(_CC[s]=Skia.Color(s)); }
+
 function mkFill(col){
-  const p=Skia.Paint(); p.setColor(Skia.Color(col)); return p;
+  _FP.setColor(_c(col)); _FP.setAlphaf(1); return _FP;
 }
 function mkAlpha(col,a){
-  const p=Skia.Paint(); p.setColor(Skia.Color(col)); p.setAlphaf(a); return p;
+  _AP.setColor(_c(col)); _AP.setAlphaf(a); return _AP;
 }
 function mkStroke(col,w){
-  const p=Skia.Paint();
-  p.setColor(Skia.Color(col));
-  p.setStyle(PaintStyle.Stroke);
-  p.setStrokeWidth(w);
-  return p;
+  _SP.setPathEffect(null); _SP.setColor(_c(col));
+  _SP.setStrokeWidth(w);   _SP.setAlphaf(1); return _SP;
 }
 function mkStrokeA(col,w,a){
-  const p=mkStroke(col,w); p.setAlphaf(a); return p;
+  _SAP.setPathEffect(null); _SAP.setColor(_c(col));
+  _SAP.setStrokeWidth(w);   _SAP.setAlphaf(a); return _SAP;
 }
 function baseZoom(W,H){ return Math.min(W,H)/WORLD; }
 function clampCam(x,y,W,H,z){
@@ -73,6 +90,7 @@ function clampCam(x,y,W,H,z){
 
 // ── Fonction de dessin principal ──────────────────────────────────────────
 function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
+  _initPool(); // garantit que le pool est prêt (no-op après premier appel)
   const phase   = v.dayPhase||0;
   const isNight = phase>=18;
   const isDusk  = phase>=15&&phase<18;
@@ -132,7 +150,7 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
     if(p._disabled){ canvas.drawCircle(sx,sy,rpx*0.4,mkAlpha('#888888',0.3)); return; }
     canvas.drawCircle(sx,sy,rpx,mkAlpha(col,0.12));
     const rp=mkStrokeA(col,1.5,0.6);
-    rp.setPathEffect(Skia.PathEffect.MakeDash([5,4]));
+    rp.setPathEffect(_dashPOI);
     canvas.drawCircle(sx,sy,rpx,rp);
   });
 
@@ -149,7 +167,7 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
     const pulse=0.5+Math.sin(t*3.5)*0.3;
     const rp=mkStroke('#ff3c3c',2.5);
     rp.setAlphaf(pulse);
-    rp.setPathEffect(Skia.PathEffect.MakeDash([7,4]));
+    rp.setPathEffect(_dashZone);
     canvas.drawCircle(zcx,zcy,rpx,rp);
   }
 
@@ -162,7 +180,7 @@ function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
     alPath.moveTo(W/2+(c1.x-cx)*z, H/2+(c1.y-cy)*z);
     alPath.lineTo(W/2+(c2.x-cx)*z, H/2+(c2.y-cy)*z);
     const alP=mkStrokeA('#e2b96f',1.5,0.35);
-    alP.setPathEffect(Skia.PathEffect.MakeDash([4,4]));
+    alP.setPathEffect(_dashAlliance);
     canvas.drawPath(alPath,alP);
   });
 

@@ -2,9 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator } from 'react-native';
-
-import { TouchableOpacity } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import BatailleScreen from '../screens/BatailleScreen';
 import LoungeScreen from '../screens/LoungeScreen';
 import MessagerieScreen from '../screens/MessagerieScreen';

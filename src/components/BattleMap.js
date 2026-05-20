@@ -29,7 +29,6 @@ const POI_COLORS = {
 };
 
 const WORLD = 300;
-const TC    = 128;
 
 // ── Couleur de terrain par biome ─────────────────────────────────────────
 const BIOME_COLORS = {

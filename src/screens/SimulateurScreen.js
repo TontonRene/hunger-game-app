@@ -927,7 +927,21 @@ export default function SimulateurScreen() {
   const reset  = useCallback(()=>{ clearInterval(intRef.current); setAuto(false); setSelId(null); setEndOpen(false); setNarrFilter(null); setGamePhase('config'); },[]);
   const tick   = useCallback(()=>setSim(p=>tickSim(p)),[]);
   const turbo  = useCallback((n=10)=>{ setAuto(false); setSim(p=>{ let s=p; for(let i=0;i<n&&s.status==='active';i++)s=tickSim(s); return s; }); },[]);
-  const finish = useCallback(()=>{ setAuto(false); setSim(p=>{ let s=p,g=1200; while(s.status==='active'&&g-->0)s=tickSim(s); return s; }); },[]);
+  const finish = useCallback(()=>{
+    setAuto(false);
+    // Découpage en chunks pour ne pas freeze le JS thread
+    let chunks = 0;
+    const runChunk = () => {
+      setSim(p => {
+        let s = p;
+        for (let i = 0; i < 100 && s.status === 'active'; i++) s = tickSim(s);
+        return s;
+      });
+      chunks++;
+      if (chunks < 12) setTimeout(runChunk, 0); // 12×100 = 1200 ticks max
+    };
+    runChunk();
+  },[]);
   const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(10,290),y:rng(10,290)}); return s; }),[]);
   const cycSpd = useCallback(()=>setSpeed(s=>s===1000?600:s===600?300:s===300?100:1000),[]);
 

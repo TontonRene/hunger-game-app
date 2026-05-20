@@ -400,6 +400,12 @@ export default function BattleMap({ battleState, onChampionTap }) {
   const savedCam  = useRef({x:WORLD/2,y:WORLD/2});
   const savedZoom = useRef(1);
 
+  // ── Interpolation tick (timestamp-based) ─────────────────────────────────
+  // lastTickRef = Date.now() au moment où le dernier battleState est arrivé
+  // tickDurRef  = durée estimée entre deux ticks (auto-calibré)
+  const lastTickRef = useRef(Date.now());
+  const tickDurRef  = useRef(10000); // 10s par défaut (backend), s'ajuste seul
+
   // ── État visuel (ref mutable — sync depuis battleState) ──────────────────
   const gvisRef = useRef({
     champions:[], zone:{cx:150,cy:150,radius:185},
@@ -443,7 +449,6 @@ export default function BattleMap({ battleState, onChampionTap }) {
       const delta = lastTs.current!==null ? ts-lastTs.current : 16;
       lastTs.current=ts;
       timeRef.current=ts/1000;
-      const lf=1-Math.pow(0.88,delta/16.67);
       const z=zoom.current;
 
       // Follow mode
@@ -458,10 +463,16 @@ export default function BattleMap({ battleState, onChampionTap }) {
         }
       }
 
-      // Lerp positions
+      // Interpolation linéaire basée sur le temps réel depuis le dernier tick
+      // alpha=0 au tick, alpha=1 au tick suivant → mouvement continu sur toute la durée
+      const now    = Date.now();
+      const elapsed= now - lastTickRef.current;
+      const tickDur= Math.max(500, tickDurRef.current);
+      const alpha  = Math.min(1, elapsed / tickDur);
+
       gvisRef.current.champions.forEach(cv=>{
-        cv.x+=(cv.tx-cv.x)*lf;
-        cv.y+=(cv.ty-cv.y)*lf;
+        cv.x = cv.prevX + (cv.tx - cv.prevX) * alpha;
+        cv.y = cv.prevY + (cv.ty - cv.prevY) * alpha;
         if(cv.combatFlash>0) cv.combatFlash=Math.max(0,cv.combatFlash-delta/1000);
       });
 
@@ -485,6 +496,15 @@ export default function BattleMap({ battleState, onChampionTap }) {
   useEffect(()=>{
     if(!battleState) return;
 
+    // Auto-calibration de la durée du tick (mesure la vraie cadence)
+    const now = Date.now();
+    const gap = now - lastTickRef.current;
+    if(gap > 300 && gap < 60000) {
+      // Moyenne pondérée pour lisser les variations
+      tickDurRef.current = tickDurRef.current * 0.3 + gap * 0.7;
+    }
+    lastTickRef.current = now;
+
     // Mise à l'échelle : backend = 100×100, simulateur = 300×300
     const mapW   = battleState.map?.width  || 100;
     const mapH   = battleState.map?.height || 100;
@@ -495,9 +515,11 @@ export default function BattleMap({ battleState, onChampionTap }) {
     const champs=(battleState.champions||[]).map((c,i)=>{
       const ex=prevMap.get(c.id);
       const tx=c.x*scaleX, ty=c.y*scaleY;
+      // prevX/prevY = position courante au moment où le tick arrive (point de départ du lerp)
       return {
         id:c.id,
         x:ex?ex.x:tx, y:ex?ex.y:ty,
+        prevX:ex?ex.x:tx, prevY:ex?ex.y:ty,
         tx, ty,
         hp:c.hp, maxHp:c.maxHp,
         color:c.color||CHAMP_COLORS[i%CHAMP_COLORS.length],

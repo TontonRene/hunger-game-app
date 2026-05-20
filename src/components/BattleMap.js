@@ -342,9 +342,13 @@ export default function BattleMap({ battleState, onChampionTap }) {
     traps:[], supplies:[], pois:[], biome:'forêt', followId:null,
   });
 
-  // ── Polices ───────────────────────────────────────────────────────────────
-  const fontSmRef  = useRef(Skia.Font(null,9));
-  const fontMidRef = useRef(Skia.Font(null,11));
+  // ── Polices (lazy — Skia.Font(null) crash iOS en v2.x) ───────────────────
+  const fontSmRef  = useRef(null);
+  const fontMidRef = useRef(null);
+  useEffect(()=>{
+    try { fontSmRef.current  = Skia.Font(undefined,9);  } catch(e){}
+    try { fontMidRef.current = Skia.Font(undefined,11); } catch(e){}
+  },[]);
 
   // ── Skia Picture (mis à jour chaque frame via RAF) ────────────────────────
   const [picture, setPicture] = useState(null);

@@ -7,79 +7,98 @@ import BattleMap from '../components/BattleMap';
 import ChampionModel from '../components/ChampionModel';
 
 // ── Constantes monde ──────────────────────────────────────────────────────
-const WORLD        = 300;
-const ISLAND_EDGE  = 28;          // pixels from edge = water zone
-const WATER_DMG    = 5;           // HP/tick while in water
-const COMBAT_RANGE = 8;
-const DAY_LEN      = 24;
-const NIGHT_START  = 18;
-const DUSK_START   = 15;
-const EVENT_COOLDOWN   = 20;
-const ALLIANCE_EVERY   = 12;
-const MENTAL_DURATIONS = { berserk:6, exhausted:8, traumatized:5 };
+const WORLD        = 900;          // ×3 — île plus grande
+const ISLAND_EDGE  = 84;           // bords = eau
+const WATER_DMG    = 3;
+const COMBAT_RANGE = 27;           // référence (combat utilise portées arme)
+const DAY_LEN      = 80;           // vrai cycle jour/nuit
+const NIGHT_START  = 60;
+const DUSK_START   = 50;
+const DAWN_START   = 8;
+const EVENT_COOLDOWN   = 40;
+const ALLIANCE_EVERY   = 30;
+const MENTAL_DURATIONS = { berserk:12, exhausted:20, traumatized:15 };
 
-// ── Système de survie ─────────────────────────────────────────────────────
-const HUNGER_DRAIN = 2;   // /tick
-const THIRST_DRAIN = 3;   // /tick
-const HUNGER_DMG   = 4;   // HP/tick when hunger=0
-const THIRST_DMG   = 6;   // HP/tick when thirst=0
-const TEMP_DMG     = 3;   // HP/tick when too hot/cold
+// ── Système de survie — lent et progressif ────────────────────────────────
+const HUNGER_DRAIN  = 0.28;  // /tick → ~0 en 360 ticks ≈ 9 min à 1500ms
+const THIRST_DRAIN  = 0.42;  // /tick → ~0 en 240 ticks ≈ 6 min
+const HUNGER_DMG    = 1;     // HP/tick quand faim=0
+const THIRST_DMG    = 2;     // HP/tick quand soif=0
+const TEMP_DMG      = 2;     // HP/tick température extrême
+const HP_REGEN_RATE = 0.4;   // HP passif/tick quand bien nourri + reposé
+const WOUND_TICKS   = 30;    // durée d'une blessure (malus speed)
 
-// ── Armes médiévales ─────────────────────────────────────────────────────
+// ── Fatigue ───────────────────────────────────────────────────────────────
+const FATIGUE_COMBAT     = 7;    // +fatigue par tick de combat
+const FATIGUE_SPRINT     = 0.3;  // +fatigue par tick de mouvement
+const FATIGUE_REST_CAMP  = 5;    // -fatigue par tick en camp
+const FATIGUE_REST_IDLE  = 1;    // -fatigue par tick immobile
+const FATIGUE_THRESHOLD  = 65;   // seuil pour chercher repos
+const FATIGUE_PENALTY    = 80;   // seuil pénalité stats
+
+// ── Armes médiévales — portées ×3, dégâts ÷3 ─────────────────────────────
 const WEAPON_DEFS = {
-  fists:  { name:'Poings',   meleeRange:9,  rangedRange:0,  dmgMin:1,  dmgMax:4,  def:0 },
-  sword:  { name:'Épée',     meleeRange:10, rangedRange:0,  dmgMin:5,  dmgMax:11, def:0 },
-  spear:  { name:'Lance',    meleeRange:18, rangedRange:0,  dmgMin:4,  dmgMax:9,  def:0 },
-  bow:    { name:'Arc',      meleeRange:9,  rangedRange:50, dmgMin:5,  dmgMax:13, def:0 },
-  shield: { name:'Bouclier', meleeRange:9,  rangedRange:0,  dmgMin:1,  dmgMax:3,  def:5 },
+  fists:  { name:'Poings',   meleeRange:27,  rangedRange:0,   dmgMin:1, dmgMax:2,  def:0 },
+  sword:  { name:'Épée',     meleeRange:32,  rangedRange:0,   dmgMin:2, dmgMax:5,  def:1 },
+  spear:  { name:'Lance',    meleeRange:54,  rangedRange:0,   dmgMin:2, dmgMax:4,  def:0 },
+  bow:    { name:'Arc',      meleeRange:27,  rangedRange:150, dmgMin:2, dmgMax:5,  def:0 },
+  shield: { name:'Bouclier', meleeRange:27,  rangedRange:0,   dmgMin:1, dmgMax:2,  def:6 },
 };
 const WEAPON_LOOT = ['sword','spear','bow','shield'];
 
-// ── Faune ─────────────────────────────────────────────────────────────────
+// ── Faune — portées ×3 ────────────────────────────────────────────────────
 const FAUNA_DEFS = {
-  deer:   { maxHp:40,  speed:5, dmg:0,  food:50, water:10, aggressive:false, fearRange:14, label:'Cerf'     },
-  wolf:   { maxHp:60,  speed:6, dmg:9,  food:30, water:5,  aggressive:true,  attackRange:10,label:'Loup'    },
-  rabbit: { maxHp:10,  speed:8, dmg:0,  food:15, water:5,  aggressive:false, fearRange:20, label:'Lapin'    },
-  boar:   { maxHp:75,  speed:4, dmg:13, food:55, water:10, aggressive:true,  attackRange:12,label:'Sanglier' },
+  deer:   { maxHp:50,  speed:6, dmg:0,  food:55, water:12, aggressive:false, fearRange:42,  label:'Cerf'     },
+  wolf:   { maxHp:70,  speed:7, dmg:5,  food:30, water:5,  aggressive:true,  attackRange:30, label:'Loup'    },
+  rabbit: { maxHp:12,  speed:9, dmg:0,  food:18, water:5,  aggressive:false, fearRange:60,  label:'Lapin'    },
+  boar:   { maxHp:90,  speed:5, dmg:8,  food:60, water:10, aggressive:true,  attackRange:36, label:'Sanglier' },
 };
 
 // ── Flore ─────────────────────────────────────────────────────────────────
 const FLORA_DEFS = {
-  berries:     { food:28,  water:8,  heal:0,  poisonChance:0,    label:'Baies'          },
-  herbs:       { food:5,   water:0,  heal:22, poisonChance:0,    label:'Herbes'         },
-  mushroom:    { food:18,  water:0,  heal:0,  poisonChance:0.40, label:'Champignon'     },
-  waterSource: { food:0,   water:55, heal:0,  poisonChance:0,    label:'Source d\'eau'  },
+  berries:     { food:32,  water:10, heal:0,  poisonChance:0,    label:'Baies'          },
+  herbs:       { food:5,   water:0,  heal:28, poisonChance:0,    label:'Herbes'         },
+  mushroom:    { food:22,  water:0,  heal:0,  poisonChance:0.35, label:'Champignon'     },
+  waterSource: { food:0,   water:60, heal:0,  poisonChance:0,    label:'Source d\'eau'  },
   poisonPlant: { food:0,   water:0,  heal:0,  poisonChance:1.0,  label:'Plante toxique' },
 };
 
-// ── POIs ──────────────────────────────────────────────────────────────────
+// ── POIs — coordonnées ×3 + nouveaux POIs pour grande map ────────────────
 const BASE_POIS = [
-  { id:'cornucopia', name:'Cornucopia',   icon:'⚡', x:150, y:150, radius:18, effect:'loot'    },
-  { id:'caves',      name:'Grottes',      icon:'🌑', x:55,  y:60,  radius:22, effect:'shelter' },
-  { id:'ruins',      name:'Ruines',       icon:'🏚', x:235, y:85,  radius:18, effect:'craft'   },
-  { id:'river',      name:'Rivière',      icon:'🌊', x:105, y:190, radius:16, effect:'water'   },
-  { id:'watchtower', name:'Tour de guet', icon:'🗼', x:255, y:215, radius:12, effect:'vision'  },
-  { id:'forest',     name:'Forêt Dense',  icon:'🌲', x:65,  y:235, radius:28, effect:'cover'   },
-  { id:'village',    name:'Village',      icon:'🏘', x:185, y:270, radius:20, effect:'loot'    },
+  { id:'cornucopia', name:'Cornucopia',     icon:'⚡', x:450, y:450, radius:54,  effect:'loot'    },
+  { id:'caves',      name:'Grottes',        icon:'🌑', x:165, y:180, radius:66,  effect:'shelter' },
+  { id:'ruins',      name:'Ruines',         icon:'🏚', x:705, y:255, radius:54,  effect:'craft'   },
+  { id:'river',      name:'Rivière',        icon:'🌊', x:315, y:570, radius:48,  effect:'water'   },
+  { id:'watchtower', name:'Tour de guet',   icon:'🗼', x:765, y:645, radius:36,  effect:'vision'  },
+  { id:'forest',     name:'Forêt Dense',    icon:'🌲', x:195, y:705, radius:84,  effect:'cover'   },
+  { id:'village',    name:'Village',        icon:'🏘', x:555, y:810, radius:60,  effect:'loot'    },
+  { id:'marsh',      name:'Marécage',       icon:'💧', x:120, y:450, radius:70,  effect:'water'   },
+  { id:'highland',   name:'Hauteurs',       icon:'⛰', x:750, y:180, radius:45,  effect:'vision'  },
+  { id:'oldcamp',    name:'Vieux Camp',     icon:'🏕', x:450, y:750, radius:55,  effect:'shelter' },
+  { id:'hotspring',  name:'Source Chaude',  icon:'♨️', x:680, y:500, radius:40,  effect:'water'   },
+  { id:'deadforest', name:'Bois Mort',      icon:'🌵', x:250, y:350, radius:75,  effect:'cover'   },
 ];
 
 // ── Craft ─────────────────────────────────────────────────────────────────
 const CRAFT_RECIPES = [
   { id:'crude_weapon', name:'Arme grossière',    icon:'🪓', requiredEffect:'craft',
-    duration:4, successStats:{instinct:0.35,survival:0.20,strength:0.15},
-    onSuccess:{stat:'strength',value:3,ticks:18}, failMsg:'La lame se brise avant d\'être terminée.' },
+    duration:10, successStats:{instinct:0.35,survival:0.20,strength:0.15},
+    onSuccess:{stat:'strength',value:3,ticks:40}, failMsg:'La lame se brise avant d\'être terminée.' },
   { id:'crude_armor',  name:'Armure de fortune', icon:'🛡', requiredEffect:'craft',
-    duration:5, successStats:{instinct:0.25,survival:0.25,endurance:0.20},
-    onSuccess:{stat:'defense',value:3,ticks:18},  failMsg:'Les sangles lâchent — armure inutilisable.' },
+    duration:12, successStats:{instinct:0.25,survival:0.25,endurance:0.20},
+    onSuccess:{stat:'defense',value:4,ticks:40},  failMsg:'Les sangles lâchent — armure inutilisable.' },
   { id:'herbal_remedy',name:'Remède naturel',    icon:'🍃', requiredEffect:['water','cover'],
-    duration:3, successStats:{survival:0.45,instinct:0.20},
-    onSuccess:{heal:40}, failMsg:'Les herbes récoltées sont les mauvaises.' },
+    duration:8,  successStats:{survival:0.45,instinct:0.20},
+    onSuccess:{heal:80}, failMsg:'Les herbes récoltées sont les mauvaises.' },
   { id:'trap',         name:'Piège',             icon:'🪤', requiredEffect:'cover',
-    duration:3, successStats:{instinct:0.40,survival:0.25},
+    duration:8,  successStats:{instinct:0.40,survival:0.25},
     onSuccess:{placeTrap:true}, failMsg:'Le piège s\'effondre avant d\'être posé.' },
   { id:'torch',        name:'Torche',            icon:'🔦', requiredEffect:['cover','shelter'],
-    duration:2, successStats:{survival:0.35,instinct:0.15},
+    duration:5,  successStats:{survival:0.35,instinct:0.15},
     onSuccess:{giveItem:'torch'}, failMsg:'Le bois est trop humide.' },
+  { id:'ration',       name:'Ration sèche',      icon:'🍖', requiredEffect:['cover','shelter'],
+    duration:6,  successStats:{survival:0.50,instinct:0.15},
+    onSuccess:{giveItem:'ration'}, failMsg:'Les provisions moisissent avant d\'être prêtes.' },
 ];
 
 // ── Archétypes ────────────────────────────────────────────────────────────
@@ -119,43 +138,43 @@ const CHAMP_COLORS = [
 
 // ── Capacités spéciales par archétype ────────────────────────────────────
 const ARCH_ABILITIES = {
-  berserker:{ name:'Charge',        icon:'💥', cooldown:10,
+  berserker:{ name:'Charge',        icon:'💥', cooldown:18,
     use(c,alive,state,ev){ const en=alive.filter(e=>e.id!==c.id&&e.hp>0); if(!en.length)return false;
       const t=en.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p);
-      const d=Math.max(8,c._eff.strength*2+rng(4,10)); t.hp-=d; t.simStats.dmgTaken+=d; c.simStats.dmgDealt+=d;
+      const d=Math.max(6,c._eff.strength+rng(3,8)); t.hp-=d; t.simStats.dmgTaken+=d; c.simStats.dmgDealt+=d;
       c.x=t.x; c.y=t.y;
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
         text:`se précipite sur ${t.name} avec une Charge ! (−${d} PV)`});
       if(t.hp<=0){c.simStats.kills++;ev.push({type:'death',champion:t.id,name:t.name,killedBy:c.id,killedByName:c.name});}
       return true; }
   },
-  hunter:{ name:'Piège Éclair', icon:'🪤', cooldown:8,
+  hunter:{ name:'Piège Éclair', icon:'🪤', cooldown:15,
     use(c,alive,state,ev){ state.map.traps.push({id:`trap_ab_${state.tick}`,x:c.x,y:c.y,ownerId:c.id});
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
         text:`pose instantanément un piège à sa position`}); return true; }
   },
-  opportunist:{ name:'Camouflage', icon:'🫥', cooldown:12,
-    use(c,alive,state,ev){ c.buffs.push({stat:'_camo',value:1,ticks:3,special:'camo'});
+  opportunist:{ name:'Camouflage', icon:'🫥', cooldown:20,
+    use(c,alive,state,ev){ c.buffs.push({stat:'_camo',value:1,ticks:8,special:'camo'});
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
-        text:`disparaît dans les ombres — Camouflage actif (3 ticks)`}); return true; }
+        text:`disparaît dans les ombres — Camouflage actif (8 ticks)`}); return true; }
   },
-  survivor:{ name:'Premiers Soins', icon:'💊', cooldown:9,
+  survivor:{ name:'Premiers Soins', icon:'💊', cooldown:16,
     use(c,alive,state,ev){ if(c.hp>=c.maxHp*0.85)return false;
-      const h=35+Math.floor((c._eff||c.stats).survival*3); c.hp=Math.min(c.maxHp,c.hp+h);
+      const h=60+Math.floor((c._eff||c.stats).survival*5); c.hp=Math.min(c.maxHp,c.hp+h);
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
         text:`applique des Premiers Soins d'urgence (+${h} PV)`}); return true; }
   },
-  tank:{ name:'Fortifier', icon:'🛡️', cooldown:11,
-    use(c,alive,state,ev){ c.buffs.push({stat:'defense',value:5,ticks:5});
+  tank:{ name:'Fortifier', icon:'🛡️', cooldown:18,
+    use(c,alive,state,ev){ c.buffs.push({stat:'defense',value:6,ticks:12});
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
-        text:`adopte une posture Fortifiée (+5 déf, 5 ticks)`}); return true; }
+        text:`adopte une posture Fortifiée (+6 déf, 12 ticks)`}); return true; }
   },
-  soldier:{ name:'Tactique', icon:'🎯', cooldown:10,
+  soldier:{ name:'Tactique', icon:'🎯', cooldown:15,
     use(c,alive,state,ev){ const en=alive.filter(e=>e.id!==c.id&&e.hp>0); if(!en.length)return false;
       const t=en.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p);
-      t.buffs.push({stat:'strength',value:-2,ticks:4},{stat:'speed',value:-1,ticks:4});
+      t.buffs.push({stat:'strength',value:-2,ticks:10},{stat:'speed',value:-1,ticks:10});
       ev.push({type:'narr',sub:'ability',id:c.id,name:c.name,tick:state.tick,
-        text:`applique Tactique sur ${t.name} (−2 str, −1 spd, 4t)`}); return true; }
+        text:`applique Tactique sur ${t.name} (−2 str, −1 spd, 10t)`}); return true; }
   },
 };
 
@@ -167,9 +186,9 @@ const sign  = v => v>0?1:v<0?-1:0;
 const clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
 
 function timeOfDay(phase) {
-  if (phase >= NIGHT_START) return '🌙 Nuit';
-  if (phase >= DUSK_START)  return '🌆 Crépuscule';
-  if (phase >= 6)           return '☀️ Jour';
+  if (phase >= NIGHT_START)  return '🌙 Nuit';
+  if (phase >= DUSK_START)   return '🌆 Crépuscule';
+  if (phase >= DAWN_START)   return '☀️ Jour';
   return '🌅 Aube';
 }
 function tickLabel(tick) {
@@ -201,26 +220,33 @@ function craftSuccessChance(champ, recipe) {
 }
 
 // ── Make champion ─────────────────────────────────────────────────────────
-function makeChamp(id, name, colorIdx, spawnRange=[20,280]) {
+function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
   const [sMin,sMax]=spawnRange;
   const stats = {
     strength:rng(3,8), speed:rng(3,8), defense:rng(2,6),
     endurance:rng(3,7), instinct:rng(2,7), survival:rng(2,7),
   };
   const endurance = stats.endurance || 3;
-  const maxHp = 100 + endurance * 10;
+  const maxHp = 300 + endurance * 30;   // ×3 — parties longues
   return {
     id, name, colorIdx,
     color: CHAMP_COLORS[colorIdx%CHAMP_COLORS.length],
     x:rng(sMin,sMax), y:rng(sMin,sMax),
     hp:maxHp, maxHp,
     hunger:100, thirst:100, temperature:50,
+    fatigue:0,              // 0-100 : épuisement
+    morale:80,              // 0-100 : moral
+    reputation:0,           // nb de kills (provoque la peur chez les autres)
     weapon:'fists',
     stats,
     archetype: getArch(stats),
     buffs:[], items:[], statusEffects:[],
     simStats:{ kills:0, dmgDealt:0, dmgTaken:0, crafts:0, survivedTicks:0 },
     _memory:{ targetId:null, targetTicks:0, lastAttackerId:null, lastHealTick:-99 },
+    _fear:   {},            // { champId: expiryTick } — peur apprise
+    _grudge: {},            // { champId: intensity } — rancune
+    _pursuitCooldown: 0,    // tick jusqu'auquel cet ennemi n'est pas pourchassé
+    _approachTick: 0,       // tick de début de phase d'approche
     _activity:{ type:'idle', startTick:0, craftId:null },
     _mentalState:'normal', _mentalStateTick:0,
     _combatTicks:0, _journal:[], _lastNarrTick:-99,
@@ -231,9 +257,9 @@ function makeChamp(id, name, colorIdx, spawnRange=[20,280]) {
 
 // ── État initial ──────────────────────────────────────────────────────────
 const MAP_SIZES = {
-  S:{ spawn:[50,250] },
-  M:{ spawn:[40,260] },
-  L:{ spawn:[30,270] },
+  S:{ spawn:[200, 700] },
+  M:{ spawn:[150, 750] },
+  L:{ spawn:[100, 800] },
 };
 
 function generateFauna(count) {
@@ -276,13 +302,13 @@ function generateFlora(biome, count) {
 }
 
 function createSimState(cfg={}) {
-  const count     = clamp(cfg.champCount||8, 4, 24);
-  const names     = (cfg.champNames||CHAMP_NAMES).slice(0,count);
-  const sizeCfg   = MAP_SIZES[cfg.mapSize||'M'];
-  const biome     = cfg.biome||['forêt','désert','toundra','marais','montagne'][rng(0,4)];
-  const champs    = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn));
-  const faunaCount = 6 + count;
-  const floraCount = 12 + count * 2;
+  const count      = clamp(cfg.champCount||8, 4, 24);
+  const names      = (cfg.champNames||CHAMP_NAMES).slice(0,count);
+  const sizeCfg    = MAP_SIZES[cfg.mapSize||'M'];
+  const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne'][rng(0,4)];
+  const champs     = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn));
+  const faunaCount = 22 + count * 2;
+  const floraCount = 40 + count * 3;
   return {
     id:'sim_local', tick:0, status:'active', winner:null,
     events:[], narrative:[],
@@ -293,16 +319,16 @@ function createSimState(cfg={}) {
       biome,
       width:WORLD, height:WORLD,
       pois:BASE_POIS.map(p=>({...p})),
-      loots:Array.from({length:6+count},(_,i)=>({
+      loots:Array.from({length:8+count},(_,i)=>({
         id:`loot_${i}`,
-        x:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
-        y:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
-        type:['sword','spear','bow','shield','soin','soin','armure'][i%7],
-        _dropTick: i * 3,  // staggered loot drop animation
+        x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
+        y:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
+        type:['sword','spear','bow','shield','soin','soin','armure','festin'][i%8],
+        _dropTick: i * 4,
       })),
       supplies:[],traps:[],
-      fauna: generateFauna(faunaCount),
-      flora: generateFlora(biome, floraCount),
+      fauna:  generateFauna(faunaCount),
+      flora:  generateFlora(biome, floraCount),
     },
     champions:champs,
   };
@@ -312,30 +338,44 @@ function createSimState(cfg={}) {
 const toward = (t,c) => ({dx:sign(t.x-c.x)||noise(1), dy:sign(t.y-c.y)||noise(1)});
 const away   = (t,c) => ({dx:sign(c.x-t.x)||noise(1), dy:sign(c.y-t.y)||noise(1)});
 
-function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent, fauna, flora) {
+function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent, fauna, flora, tick) {
   const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
 
   // Alliés : exclure des ennemis cibles
-  const myAlly    = (alliances||[]).find(al=>al.ids.includes(c.id));
-  const allyId    = myAlly?.ids.find(id=>id!==c.id);
-  const targets   = (allyId ? enemies.filter(e=>e.id!==allyId) : enemies);
-  const nearest   = targets.length ? targets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
-  const weakest   = targets.length ? targets.reduce((p,e)=>e.hp<p.hp?e:p)         : null;
+  const myAlly  = (alliances||[]).find(al=>al.ids.includes(c.id));
+  const allyId  = myAlly?.ids.find(id=>id!==c.id);
+  const targets = allyId ? enemies.filter(e=>e.id!==allyId) : enemies;
+  const nearest = targets.length ? targets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
+  const weakest = targets.length ? targets.reduce((p,e)=>e.hp<p.hp?e:p) : null;
 
-  const hpR       = c.hp / c.maxHp;
-  const hungerR   = (c.hunger??100) / 100;
-  const thirstR   = (c.thirst??100) / 100;
+  const hpR      = c.hp / c.maxHp;
+  const hungerR  = (c.hunger??100) / 100;
+  const thirstR  = (c.thirst??100) / 100;
+  const fatigueR = (c.fatigue??0) / 100;
+  const morale   = (c.morale??80);
+
+  // Ressources proches
   const nearSup   = supplies.length ? supplies.reduce((p,s)=>dist(s,c)<dist(p,c)?s:p) : null;
-  const nearFauna = (fauna||[]).filter(f=>f.hp>0&&dist(f,c)<60);
-  const nearFlora = (flora||[]).filter(f=>!f.collected&&dist(f,c)<40);
+  const nearFauna = (fauna||[]).filter(f=>f.hp>0&&dist(f,c)<180);
+  const nearFlora = (flora||[]).filter(f=>!f.collected&&dist(f,c)<120);
   const nearWater = nearFlora.find(f=>f.type==='waterSource');
   const nearFood  = nearFlora.find(f=>FLORA_DEFS[f.type]?.food>0);
   const prefPOI   = pois.find(p=>p.id===(ARCH[c.archetype]||ARCH.soldier).preferPOI);
+  const shelterPOI= pois.find(p=>!p._disabled&&(p.effect==='shelter'||p.effect==='cover'));
+  const waterPOI  = pois.find(p=>!p._disabled&&(p.effect==='water'));
 
-  const detectRange = (activeEvent?.type==='fog'||activeEvent?.type==='sandstorm') ? 30 : 90;
-  const visTargets  = targets.filter(e=>dist(e,c)<detectRange);
+  // Portée de détection — réduite la nuit et lors d'événements météo
+  const baseDetect = 270;
+  const detectRange = (activeEvent?.type==='fog'||activeEvent?.type==='sandstorm') ? 90
+    : isNight ? 150 : baseDetect;
+  const visTargets = targets.filter(e=>dist(e,c)<detectRange);
 
-  // Urgence : score de 0 à N pour chaque action
+  // Ennemi le plus proche visible
+  const closestEnemy = visTargets.length ? visTargets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
+  const enemyDist    = closestEnemy ? dist(closestEnemy,c) : 9999;
+  const weapon       = WEAPON_DEFS[c.weapon||'fists'];
+
+  // ── Scores d'action ───────────────────────────────────────────────────
   const scores = {
     attack_melee:   0,
     attack_ranged:  0,
@@ -346,143 +386,204 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
     collect_supply: 0,
     explore:        0,
     seek_shelter:   0,
+    rest_camp:      0,
   };
 
-  // Danger
-  const closestEnemy = visTargets.length ? visTargets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
-  const enemyDist    = closestEnemy ? dist(closestEnemy,c) : 999;
-  const weapon       = WEAPON_DEFS[c.weapon||'fists'];
+  // ── Fatigue → repos prioritaire ───────────────────────────────────────
+  if (fatigueR > FATIGUE_THRESHOLD/100) {
+    scores.rest_camp += Math.round(fatigueR * 10);
+    scores.seek_shelter += Math.round(fatigueR * 4);
+  }
+  if (fatigueR > FATIGUE_PENALTY/100) {
+    // Trop épuisé pour se battre efficacement
+    scores.attack_melee  = 0;
+    scores.attack_ranged = 0;
+    scores.flee_enemy   += 4;
+  }
 
-  if (closestEnemy) {
-    const canMelee  = enemyDist <= weapon.meleeRange * 2.5;
-    const canRanged = weapon.rangedRange > 0 && enemyDist <= weapon.rangedRange * 2.5;
-    const isWeak    = closestEnemy.hp / closestEnemy.maxHp < 0.4;
-    const iStrong   = hpR > 0.55;
+  // ── Morale bas → comportement défensif ────────────────────────────────
+  if (morale < 35) {
+    scores.flee_enemy   += 3;
+    scores.attack_melee  = Math.max(0, scores.attack_melee - 2);
+    scores.seek_shelter += 2;
+  }
 
-    if (iStrong || isWeak) {
-      if (canMelee)  scores.attack_melee  += 5 + (isWeak?3:0);
-      if (canRanged) scores.attack_ranged += 4 + (isWeak?2:0);
+  // ── Combat ────────────────────────────────────────────────────────────
+  if (closestEnemy && fatigueR < FATIGUE_PENALTY/100) {
+    // Peur apprise : si cet ennemi m'a déjà mis à genoux
+    const fearExpiry = (c._fear||{})[closestEnemy.id];
+    const isFeared   = fearExpiry && tick < fearExpiry;
+    // Réputation : ennemi avec beaucoup de kills → on fuit
+    const isScary    = (closestEnemy.reputation||0) >= 3;
+
+    if (isFeared || isScary) {
+      scores.flee_enemy += 5 + (isFeared?2:0) + (isScary?2:0);
+    } else {
+      const canMelee  = enemyDist <= weapon.meleeRange * 2.5;
+      const canRanged = weapon.rangedRange > 0 && enemyDist <= weapon.rangedRange * 2.0;
+      const isWeak    = (closestEnemy.hp/closestEnemy.maxHp) < 0.4;
+      const iStrong   = hpR > 0.6 && morale > 50;
+
+      if (iStrong || isWeak) {
+        if (canMelee)  scores.attack_melee  += 4 + (isWeak?3:0);
+        if (canRanged) scores.attack_ranged += 4 + (isWeak?2:0);
+      }
+      // Rancune : si cet ennemi a tué un allié → attaque prioritaire
+      const grudge = (c._grudge||{})[closestEnemy.id]||0;
+      if (grudge > 0) scores.attack_melee += grudge * 2;
     }
-    if (hpR < 0.35 && !isWeak) scores.flee_enemy += 6 + (enemyDist<15?4:0);
-    if (hpR < 0.55 && enemyDist < 20) scores.flee_enemy += 2;
+
+    // Fuite si blessé ou en danger
+    if (hpR < 0.5)  scores.flee_enemy += Math.round((0.5-hpR)*12);
+    if (hpR < 0.35) scores.flee_enemy += 5;
+    if (hpR < 0.55 && enemyDist < 60) scores.flee_enemy += 2;
   }
 
-  // Faim / soif → survie devient prioritaire
-  if (hungerR < 0.35) scores.seek_food  += Math.round((1-hungerR)*8);
-  if (thirstR < 0.35) scores.seek_water += Math.round((1-thirstR)*10);
-  if (hungerR < 0.6)  scores.seek_food  += 2;
-  if (thirstR < 0.6)  scores.seek_water += 2;
+  // ── Faim / soif ───────────────────────────────────────────────────────
+  if (hungerR < 0.4) scores.seek_food  += Math.round((1-hungerR)*9);
+  if (thirstR < 0.4) scores.seek_water += Math.round((1-thirstR)*11);
+  if (hungerR < 0.65) scores.seek_food  += 2;
+  if (thirstR < 0.65) scores.seek_water += 3;
 
-  // Chasse d'animaux (nourriture + ressource)
-  if (nearFauna.length && hungerR < 0.7) {
+  // ── Chasse ────────────────────────────────────────────────────────────
+  if (nearFauna.length && hungerR < 0.75) {
     const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive);
-    if (prey) scores.hunt_animal += 3 + (hungerR<0.4?3:0);
+    if (prey) scores.hunt_animal += 3 + (hungerR<0.5?4:0);
   }
 
-  // Colis / arme
-  if (nearSup) scores.collect_supply += nearSup.type.match(/sword|spear|bow|shield/) ? 5 : 3;
+  // ── Colis / arme ──────────────────────────────────────────────────────
+  if (nearSup) scores.collect_supply += WEAPON_DEFS[nearSup.type] ? 6 : 3;
 
-  // Nuit → abri pour instinct faibles
-  if (isNight && c.stats.instinct <= 4 && hpR > 0.5) scores.seek_shelter += 4;
+  // ── Nuit : tout le monde cherche un abri ──────────────────────────────
+  if (isNight) {
+    const hasFireOrShelter = c._activity?.type==='campfire' ||
+      pois.some(p=>!p._disabled&&(p.effect==='shelter')&&dist(c,p)<p.radius*1.5);
+    if (!hasFireOrShelter) {
+      scores.seek_shelter += 4 + (c.stats.survival>=5 ? 2 : 0);
+      scores.rest_camp    += 3;
+    }
+  }
 
-  // Exploration : basse urgence si rien de pressant
+  // ── Exploration ───────────────────────────────────────────────────────
   scores.explore += 1;
 
-  // Modificateurs selon archétype
+  // ── Modificateurs archétype ───────────────────────────────────────────
   switch(c.archetype) {
     case 'berserker':
-      scores.attack_melee  = Math.round(scores.attack_melee * 1.7);
-      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.3);
-      scores.explore       += 1;
+      scores.attack_melee  = Math.round(scores.attack_melee * 1.8);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.25);
+      scores.rest_camp     = Math.round(scores.rest_camp * 0.5);
+      scores.explore       += 2;
       break;
     case 'hunter':
-      scores.attack_ranged = Math.round(scores.attack_ranged * 1.5);
-      scores.hunt_animal   = Math.round(scores.hunt_animal * 1.6);
+      scores.attack_ranged = Math.round(scores.attack_ranged * 1.6);
+      scores.hunt_animal   = Math.round(scores.hunt_animal   * 1.8);
       scores.flee_enemy    = Math.round(scores.flee_enemy * 1.1);
       break;
     case 'survivor':
-      scores.flee_enemy    = Math.round(scores.flee_enemy * 1.5);
-      scores.seek_food     = Math.round(scores.seek_food * 1.4);
-      scores.seek_water    = Math.round(scores.seek_water * 1.4);
-      scores.attack_melee  = Math.round(scores.attack_melee * 0.5);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 1.6);
+      scores.seek_food     = Math.round(scores.seek_food  * 1.5);
+      scores.seek_water    = Math.round(scores.seek_water * 1.5);
+      scores.rest_camp     = Math.round(scores.rest_camp  * 1.4);
+      scores.attack_melee  = Math.round(scores.attack_melee * 0.4);
       break;
     case 'opportunist':
-      scores.collect_supply= Math.round(scores.collect_supply * 1.5);
-      scores.attack_melee  = closestEnemy && closestEnemy.hp/closestEnemy.maxHp<0.3 ? scores.attack_melee*2 : Math.round(scores.attack_melee*0.7);
+      scores.collect_supply = Math.round(scores.collect_supply * 1.6);
+      scores.attack_melee   = closestEnemy && (closestEnemy.hp/closestEnemy.maxHp)<0.3
+        ? scores.attack_melee*2 : Math.round(scores.attack_melee*0.65);
       break;
     case 'tank':
-      scores.attack_melee  = Math.round(scores.attack_melee * 1.3);
-      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.4);
+      scores.attack_melee  = Math.round(scores.attack_melee * 1.4);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.3);
+      scores.rest_camp     = Math.round(scores.rest_camp  * 0.7);
       break;
     case 'soldier':
       scores.explore += 1;
       if (c._memory?.lastAttackerId && targets.find(e=>e.id===c._memory.lastAttackerId))
-        scores.attack_melee += 3;
+        scores.attack_melee += 4;
       break;
   }
 
-  // Modificateurs selon consigne (instructions keyword)
+  // ── Modificateurs consigne ────────────────────────────────────────────
   const instr = (c.instructions||'').toLowerCase();
   if (instr.match(/agress|attaque|guerr|combat/)) {
-    scores.attack_melee  += 3; scores.attack_ranged += 2; scores.flee_enemy = Math.max(0,scores.flee_enemy-2);
+    scores.attack_melee  += 4; scores.attack_ranged += 3;
+    scores.flee_enemy     = Math.max(0, scores.flee_enemy-3);
+    scores.rest_camp      = Math.max(0, scores.rest_camp-2);
   }
   if (instr.match(/fuit|évit|cache|discr/)) {
-    scores.flee_enemy += 3; scores.attack_melee = Math.max(0,scores.attack_melee-2);
+    scores.flee_enemy    += 4; scores.attack_melee = Math.max(0,scores.attack_melee-3);
+    scores.seek_shelter  += 3;
   }
   if (instr.match(/survie|nourriture|ressource/)) {
-    scores.seek_food += 3; scores.seek_water += 2; scores.hunt_animal += 2;
+    scores.seek_food     += 4; scores.seek_water += 3; scores.hunt_animal += 3;
+    scores.rest_camp     += 2;
   }
-  if (instr.match(/explor|bouger|card/)) {
-    scores.explore += 4;
+  if (instr.match(/explor|bouger|découv/)) {
+    scores.explore += 5; scores.rest_camp = Math.max(0,scores.rest_camp-2);
+  }
+  if (instr.match(/repos|dor|camp|calme/)) {
+    scores.rest_camp += 5; scores.seek_shelter += 3;
   }
 
-  // Tirage pondéré
+  // ── Tirage pondéré ────────────────────────────────────────────────────
   const entries = Object.entries(scores).filter(([,v])=>v>0);
-  if (!entries.length) return {dx:noise(1),dy:noise(1)};
-  const total   = entries.reduce((s,[,v])=>s+v, 0);
-  let pick = Math.random() * total;
-  let chosen = entries[entries.length-1][0];
+  if (!entries.length) return {dx:noise(2),dy:noise(2)};
+  const total = entries.reduce((s,[,v])=>s+v, 0);
+  let pick = Math.random() * total, chosen = entries[entries.length-1][0];
   for (const [action, score] of entries) {
     pick -= score;
     if (pick <= 0) { chosen = action; break; }
   }
 
-  // Exécution de l'action choisie
+  // ── Exécution ─────────────────────────────────────────────────────────
   switch(chosen) {
     case 'attack_melee':
     case 'attack_ranged': {
-      const t = chosen==='attack_ranged' && weakest ? weakest : (nearest || weakest);
-      return t ? toward(t,c) : {dx:noise(1),dy:noise(1)};
+      const t = chosen==='attack_ranged' && weakest ? weakest : (nearest||weakest);
+      if (!t) return {dx:noise(2),dy:noise(2)};
+      // Phase d'approche : circler légèrement avant de charger
+      const d2 = dist(t,c);
+      if (d2 > weapon.meleeRange * 3 && Math.random() < 0.35) {
+        // Approche oblique — pas direct
+        return { dx: sign(t.x-c.x)+noise(1), dy: sign(t.y-c.y)+noise(1) };
+      }
+      return toward(t,c);
     }
     case 'flee_enemy':
-      return closestEnemy ? away(closestEnemy,c) : {dx:noise(1),dy:noise(1)};
+      return closestEnemy ? away(closestEnemy,c) : {dx:noise(2),dy:noise(2)};
     case 'seek_food': {
       if (nearFood) return toward(nearFood,c);
       const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive);
       if (prey) return toward(prey,c);
       if (nearSup && nearSup.type==='soin') return toward(nearSup,c);
-      return {dx:noise(1),dy:noise(1)};
+      // Explorer vers une zone de forêt/couverte
+      const cover = pois.find(p=>!p._disabled&&(p.effect==='cover'||p.effect==='water'));
+      return cover ? toward(cover,c) : {dx:noise(2),dy:noise(2)};
     }
     case 'seek_water': {
       if (nearWater) return toward(nearWater,c);
-      const waterPOI = pois.find(p=>!p._disabled&&p.effect==='water');
-      if (waterPOI) return toward(waterPOI,c);
-      return {dx:noise(1),dy:noise(1)};
+      if (waterPOI)  return toward(waterPOI,c);
+      return {dx:noise(2),dy:noise(2)};
     }
     case 'hunt_animal': {
-      const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive&&dist(f,c)<60);
-      return prey ? toward(prey,c) : {dx:noise(1),dy:noise(1)};
+      const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive&&dist(f,c)<180);
+      return prey ? toward(prey,c) : {dx:noise(2),dy:noise(2)};
     }
     case 'collect_supply':
-      return nearSup ? toward(nearSup,c) : {dx:noise(1),dy:noise(1)};
-    case 'seek_shelter': {
-      const shelter = pois.find(p=>!p._disabled&&(p.effect==='shelter'||p.effect==='cover'));
-      return shelter ? toward(shelter,c) : {dx:noise(1),dy:noise(1)};
+      return nearSup ? toward(nearSup,c) : {dx:noise(2),dy:noise(2)};
+    case 'seek_shelter':
+      return shelterPOI ? toward(shelterPOI,c) : {dx:noise(2),dy:noise(2)};
+    case 'rest_camp': {
+      // S'arrêter près d'un abri ou là où on est
+      if (shelterPOI && dist(c,shelterPOI)>shelterPOI.radius*0.8)
+        return toward(shelterPOI,c);
+      return {dx:0,dy:0}; // rester sur place — allumer le feu
     }
     case 'explore':
     default:
-      if (prefPOI&&!prefPOI._disabled&&dist(prefPOI,c)>30) return toward(prefPOI,c);
-      return {dx:noise(1)*2, dy:noise(1)*2};
+      if (prefPOI&&!prefPOI._disabled&&dist(prefPOI,c)>90) return toward(prefPOI,c);
+      return {dx:noise(2)*2, dy:noise(2)*2};
   }
 }
 
@@ -599,7 +700,7 @@ function checkTraps(alive, traps, events, tick) {
     let triggered = false;
     for (const c of alive) {
       if (c.id===trap.ownerId||c.hp<=0) continue;
-      if (dist(c,trap)<5) {
+      if (dist(c,trap)<15) {
         const dmg = rng(12,22);
         c.hp -= dmg; c.simStats.dmgTaken += dmg;
         events.push({type:'narr',sub:'trap_trigger',id:c.id,name:c.name,tick,
@@ -642,7 +743,7 @@ function tryAlliance(alive, state, events) {
   for (let i=0; i<alive.length; i++) {
     for (let j=i+1; j<alive.length; j++) {
       const a=alive[i], b=alive[j];
-      if (dist(a,b)>45) continue;
+      if (dist(a,b)>135) continue;
       if ((state.alliances||[]).some(al=>al.ids.includes(a.id)||al.ids.includes(b.id))) continue;
       const bothWeak   = a.hp/a.maxHp<0.45 && b.hp/b.maxHp<0.45;
       const hasSurvivor= a.archetype==='survivor'||b.archetype==='survivor';
@@ -666,7 +767,7 @@ function tryRandomEvent(state, events) {
     const alive   = state.champions.filter(c=>c.hp>0);
     const elapsed = state.tick - ae.startTick;
     if (ae.type==='fire') {
-      const r = ae.radius + elapsed*1.5;
+      const r = ae.radius + elapsed*3;
       alive.forEach(c=>{
         if (Math.hypot(c.x-ae.x,c.y-ae.y)<r) {
           const dmg=rng(5,11); c.hp-=dmg; c.simStats.dmgTaken+=dmg;
@@ -714,14 +815,14 @@ function tryRandomEvent(state, events) {
       const count=rng(3,5);
       const types=['soin','soin','force','vitesse','armure'];
       for(let i=0;i<count;i++)
-        state.map.supplies.push({id:`ev_${i}_${state.tick}`,type:types[i%types.length],x:rng(80,220),y:rng(80,220)});
+        state.map.supplies.push({id:`ev_${i}_${state.tick}`,type:types[i%types.length],x:rng(250,650),y:rng(250,650)});
       events.push({type:'event',evType:'supply_rain',tick:state.tick,
         text:`📦 Les Organisateurs larguent ${count} colis en zone centrale !`});
       break;
     }
     case 'fire': {
-      const p=state.map.pois.find(poi=>poi.effect==='cover')||{x:65,y:235};
-      state.activeEvent={type:'fire',startTick:state.tick,duration:8,x:p.x+rng(-10,10),y:p.y+rng(-10,10),radius:18};
+      const p=state.map.pois.find(poi=>poi.effect==='cover')||{x:195,y:705};
+      state.activeEvent={type:'fire',startTick:state.tick,duration:10,x:p.x+rng(-30,30),y:p.y+rng(-30,30),radius:54};
       events.push({type:'event',evType:'fire',tick:state.tick,text:`🔥 Un incendie se déclare dans la zone végétale !`});
       break;
     }
@@ -802,7 +903,7 @@ function tryAbility(c, alive, state, events) {
   if (state.tick - c._abilityCooldown < ab.cooldown) return;
   if (Math.random()>0.20) return;
   const enemies=alive.filter(e=>e.id!==c.id&&e.hp>0);
-  const nearEnemy=enemies.some(e=>dist(e,c)<40);
+  const nearEnemy=enemies.some(e=>dist(e,c)<120);
   const lowHp=c.hp/c.maxHp<0.55;
   if (!nearEnemy&&!lowHp&&c.archetype!=='hunter') return;
   if (ab.use(c,alive,state,events)) c._abilityCooldown=state.tick;
@@ -848,33 +949,70 @@ function tickSim(prev) {
   // Survie tick
   alive.forEach(c=>c.simStats.survivedTicks++);
 
-  // ── Survie : faim / soif / température ───────────────────────────────
+  // ── Survie : faim / soif / température / fatigue ─────────────────────
   const biomeTemp = {forêt:50, désert:82, toundra:12, marais:55, montagne:18};
   alive.forEach(c=>{
     if (c.hp<=0) return;
     c.hunger = Math.max(0, (c.hunger??100) - HUNGER_DRAIN);
     c.thirst = Math.max(0, (c.thirst??100) - THIRST_DRAIN);
-    // Température cible selon biome + nuit
-    const tTarget = (biomeTemp[state.map.biome]||50) + (isNight ? -12 : 0);
-    c.temperature = c.temperature==null ? 50
-      : c.temperature + (tTarget - c.temperature) * 0.15 + noise(3);
+
+    // Température cible selon biome + nuit + abri
+    const nearShelter = state.map.pois.find(p=>!p._disabled&&(p.effect==='shelter')&&dist(c,p)<p.radius*1.3);
+    const hasFire     = c._activity?.type==='campfire' || c.items?.includes('torch');
+    const tTarget = (biomeTemp[state.map.biome]||50) + (isNight ? -15 : 0) + (hasFire ? 20 : 0) + (nearShelter ? 8 : 0);
+    c.temperature = c.temperature==null ? 50 : c.temperature + (tTarget - c.temperature)*0.12 + noise(2);
     c.temperature = clamp(c.temperature, 0, 100);
-    // Dégâts si faim/soif/temp extrêmes
+
+    // Morale : baisse progressivement mais remonte si on mange/se repose
+    const moraleGain = (c.hunger>60&&c.thirst>60 ? 0.3 : 0) + (c._activity?.type==='campfire' ? 0.5 : 0);
+    c.morale = clamp((c.morale??80) - 0.1 + moraleGain, 0, 100);
+
+    // ── Dégâts progressifs ────────────────────────────────────────────
     if (c.hunger <= 0) {
       const d = HUNGER_DMG; c.hp -= d; c.simStats.dmgTaken += d;
-      events.push({type:'narr',sub:'hunger',id:c.id,name:c.name,tick:state.tick,
-        text:`souffre de faim — épuisement total (−${d} PV)`});
+      if (state.tick%8===0) events.push({type:'narr',sub:'hunger',id:c.id,name:c.name,tick:state.tick,
+        text:`souffre de faim sévère (−${d} PV)`});
+    } else if (c.hunger < 20) {
+      c.hp -= 0.3;  // dégâts doux avant la mort de faim
     }
+
     if (c.thirst <= 0) {
       const d = THIRST_DMG; c.hp -= d; c.simStats.dmgTaken += d;
-      events.push({type:'narr',sub:'thirst',id:c.id,name:c.name,tick:state.tick,
-        text:`se déshydrate dangereusement (−${d} PV)`});
+      if (state.tick%6===0) events.push({type:'narr',sub:'thirst',id:c.id,name:c.name,tick:state.tick,
+        text:`se déshydrate gravement (−${d} PV)`});
+    } else if (c.thirst < 15) {
+      c.hp -= 0.5;
     }
-    if (c.temperature < 15 || c.temperature > 80) {
-      const d = TEMP_DMG; c.hp -= d; c.simStats.dmgTaken += d;
-      const msg = c.temperature < 15 ? `gèle sur place (−${d} PV)` : `souffre de la chaleur extrême (−${d} PV)`;
-      events.push({type:'narr',sub:'temperature',id:c.id,name:c.name,tick:state.tick,text:msg});
+
+    // Température extrême — protégée par abri/feu
+    if (!hasFire && !nearShelter) {
+      if (c.temperature < 12 || c.temperature > 82) {
+        const d = TEMP_DMG; c.hp -= d; c.simStats.dmgTaken += d;
+        const msg = c.temperature < 12 ? `gèle sans feu ni abri (−${d} PV)` : `souffre de la chaleur (−${d} PV)`;
+        if (state.tick%5===0) events.push({type:'narr',sub:'temperature',id:c.id,name:c.name,tick:state.tick,text:msg});
+      }
     }
+
+    // Régénération passive HP si bien nourri et reposé
+    if (c.hunger > 50 && c.thirst > 50 && (c.fatigue||0) < 60) {
+      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE);
+    }
+    // Regen bonus en camp
+    if (c._activity?.type==='campfire') {
+      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE * 3);
+      c.hunger = Math.min(100, c.hunger + 0.2);
+      c.thirst = Math.min(100, c.thirst + 0.3);
+    }
+
+    // Ration consommable
+    if (c.items?.includes('ration') && (c.hunger < 30 || c.thirst < 25)) {
+      c.hunger = Math.min(100, c.hunger + 40);
+      c.thirst = Math.min(100, c.thirst + 20);
+      c.items  = c.items.filter(i=>i!=='ration');
+      events.push({type:'narr',sub:'forage',id:c.id,name:c.name,tick:state.tick,
+        text:`mange sa ration sèche (+40🍗 +20💧)`});
+    }
+
     if (c.hp <= 0) events.push({type:'death',champion:c.id,name:c.name,killedBy:'survival',killedByName:'survie'});
   });
 
@@ -885,20 +1023,32 @@ function tickSim(prev) {
     const nearPOI = state.map.pois.find(p=>!p._disabled&&dist(c,p)<p.radius);
     if (nearPOI?.effect==='vision')  c._eff.instinct  = Math.min(10,c._eff.instinct+2);
     if (nearPOI?.effect==='water')   c._eff.endurance = Math.min(10,c._eff.endurance+1);
-    if (nearPOI?.effect==='shelter'&&isNight) c._eff.defense=Math.min(10,c._eff.defense+1);
+    if (nearPOI?.effect==='shelter'&&isNight) c._eff.defense=Math.min(10,c._eff.defense+2);
     if (nearPOI?.effect==='cover')   c._eff.instinct  = Math.min(10,c._eff.instinct+1);
     if (c.items?.includes('torch'))  c._coldProof=true;
+    // Malus fatigue sur les stats
+    const fatigueR = (c.fatigue||0)/100;
+    if (fatigueR > FATIGUE_PENALTY/100) {
+      c._eff.speed    = Math.max(1, c._eff.speed - 2);
+      c._eff.strength = Math.max(1, c._eff.strength - 2);
+      c._eff.instinct = Math.max(1, c._eff.instinct - 1);
+    } else if (fatigueR > FATIGUE_THRESHOLD/100) {
+      c._eff.speed    = Math.max(1, c._eff.speed - 1);
+    }
+    // Malus faim/soif sur les stats
+    if ((c.hunger??100) < 30) c._eff.strength = Math.max(1, c._eff.strength - 1);
+    if ((c.thirst??100) < 25) c._eff.instinct = Math.max(1, c._eff.instinct - 1);
     applyMentalEffects(c);
   });
 
-  // Heal survie
+  // Heal survie — camp (cooldown plus long)
   alive.forEach(c=>{
-    if (c._eff.survival<6||c.hp>=c.maxHp*0.82) return;
-    if (state.tick-(c._memory.lastHealTick??-99)<5) return;
+    if (c._eff.survival<6||c.hp>=c.maxHp*0.80) return;
+    if (state.tick-(c._memory.lastHealTick??-99)<15) return;
     const others=alive.filter(e=>e.id!==c.id&&e.hp>0);
     const close=others.length?others.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p):null;
-    if (close&&dist(close,c)<24) return;
-    const heal=10+Math.floor(c._eff.survival*1.5);
+    if (close&&dist(close,c)<72) return;
+    const heal=8+Math.floor(c._eff.survival*2);
     c.hp=Math.min(c.maxHp,c.hp+heal);
     c._memory.lastHealTick=state.tick;
     events.push({type:'heal',champion:c.id,name:c.name,amount:heal});
@@ -939,9 +1089,15 @@ function tickSim(prev) {
     const stormSlow = (state.activeEvent?.type==='sandstorm'||state.activeEvent?.type==='fog') ? 0.55 : 1;
     const nightSlow = isNight&&c.stats.instinct<=4 ? 0.6 : 1;
     const spd = Math.max(1,c._eff.speed) * stormSlow * nightSlow;
-    const {dx,dy} = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora);
-    c.x = clamp(c.x+dx*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
-    c.y = clamp(c.y+dy*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+    const {dx,dy} = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick);
+    c.fatigue = clamp((c.fatigue||0) + (dx===0&&dy===0 ? -FATIGUE_REST_IDLE : FATIGUE_SPRINT), 0, 100);
+    if (dx===0 && dy===0) {
+      // Repos actif — campfire si la nuit
+      if (isNight && c._activity.type==='idle') c._activity = {type:'campfire', startTick:state.tick};
+    } else {
+      c.x = clamp(c.x+dx*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+      c.y = clamp(c.y+dy*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+    }
   });
 
   // ── Dégâts eau (bords de l'île) ──────────────────────────────────────
@@ -1043,7 +1199,7 @@ function tickSim(prev) {
       return;
     }
     for (const c of aliveChamps) {
-      if (c.hp<=0||dist(c,f)>8) continue;
+      if (c.hp<=0||dist(c,f)>24) continue;
       const def = FLORA_DEFS[f.type];
       if (!def) continue;
       // Poison
@@ -1067,7 +1223,7 @@ function tickSim(prev) {
         }
       }
       f.collected = true;
-      f.respawnTick = state.tick + 20;
+      f.respawnTick = state.tick + 80;
       break;
     }
   });
@@ -1116,7 +1272,6 @@ function tickSim(prev) {
       const a=fighters[i], b=fighters[j];
       if (a.hp<=0||b.hp<=0) continue;
       const d = dist(a,b);
-      // Portée : chaque combattant peut frapper avec son arme si à portée
       const wA = WEAPON_DEFS[a.weapon||'fists'];
       const wB = WEAPON_DEFS[b.weapon||'fists'];
       const aCanHit = d <= wA.meleeRange || (wA.rangedRange > 0 && d <= wA.rangedRange);
@@ -1125,23 +1280,61 @@ function tickSim(prev) {
       // Alliance → pas de combat
       const allied=(state.alliances||[]).some(al=>al.ids.includes(a.id)&&al.ids.includes(b.id));
       if (allied) continue;
-      // Trêve
-      if (a.hp/a.maxHp<0.32&&b.hp/b.maxHp<0.32&&Math.random()<0.45) {
-        events.push({type:'narr',sub:'truce',id:a.id,name:a.name,tick:state.tick,
-          text:`et ${b.name} s'évitent — trop épuisés`});
+
+      // ── Cooldown de poursuite : on laisse fuir ──────────────────────
+      const aOnCooldown = (a._pursuitCooldown||0) > state.tick;
+      const bOnCooldown = (b._pursuitCooldown||0) > state.tick;
+      if (aOnCooldown && bOnCooldown) continue;
+
+      // ── Fuite à 50% HP — instinct de survie fort ────────────────────
+      const aFlees = a.hp/a.maxHp < 0.50 && a.archetype!=='berserker' && Math.random()<0.65;
+      const bFlees = b.hp/b.maxHp < 0.50 && b.archetype!=='berserker' && Math.random()<0.65;
+      if (aFlees) {
+        const fd = away(b,a); a.x=clamp(a.x+fd.dx*a._eff.speed*1.5,0,WORLD-1); a.y=clamp(a.y+fd.dy*a._eff.speed*1.5,0,WORLD-1);
+        a._pursuitCooldown = state.tick + 12;
+        if (Math.random()<0.4) events.push({type:'narr',sub:'flee',id:a.id,name:a.name,tick:state.tick,
+          text:`bat en retraite — trop blessé pour continuer !`});
         continue;
       }
-      // Traumatisé ne contre-attaque pas les 3 premiers ticks
-      const aPanic = a._mentalState==='traumatized'&&(state.tick-a._mentalStateTick)<3;
-      const bPanic = b._mentalState==='traumatized'&&(state.tick-b._mentalStateTick)<3;
-      if (aPanic) { a.x=clamp(a.x+away(b,a).dx*a._eff.speed,0,WORLD-1); a.y=clamp(a.y+away(b,a).dy*a._eff.speed,0,WORLD-1); continue; }
-      if (bPanic) { b.x=clamp(b.x+away(a,b).dx*b._eff.speed,0,WORLD-1); b.y=clamp(b.y+away(a,b).dy*b._eff.speed,0,WORLD-1); continue; }
-      // Désengagement survivor
-      if (a.archetype==='survivor'&&a.hp/a.maxHp>0.4&&Math.random()<0.42) {
-        a.x=clamp(a.x+away(b,a).dx*a._eff.speed,0,WORLD-1); a.y=clamp(a.y+away(b,a).dy*a._eff.speed,0,WORLD-1); continue;
+      if (bFlees) {
+        const fd = away(a,b); b.x=clamp(b.x+fd.dx*b._eff.speed*1.5,0,WORLD-1); b.y=clamp(b.y+fd.dy*b._eff.speed*1.5,0,WORLD-1);
+        b._pursuitCooldown = state.tick + 12;
+        if (Math.random()<0.4) events.push({type:'narr',sub:'flee',id:b.id,name:b.name,tick:state.tick,
+          text:`bat en retraite — trop blessé pour continuer !`});
+        continue;
       }
-      if (b.archetype==='survivor'&&b.hp/b.maxHp>0.4&&Math.random()<0.42) {
-        b.x=clamp(b.x+away(a,b).dx*b._eff.speed,0,WORLD-1); b.y=clamp(b.y+away(a,b).dy*b._eff.speed,0,WORLD-1); continue;
+
+      // ── Trêve si les deux très blessés ──────────────────────────────
+      if (a.hp/a.maxHp<0.28&&b.hp/b.maxHp<0.28&&Math.random()<0.60) {
+        events.push({type:'narr',sub:'truce',id:a.id,name:a.name,tick:state.tick,
+          text:`et ${b.name} s'effondrent, trop épuisés pour combattre`});
+        a._pursuitCooldown = b._pursuitCooldown = state.tick + 20;
+        continue;
+      }
+
+      // ── Intimidation par la réputation ───────────────────────────────
+      if ((b.reputation||0) >= 3 && Math.random() < 0.25 && a.archetype!=='berserker') {
+        const fd = away(b,a); a.x=clamp(a.x+fd.dx*a._eff.speed,0,WORLD-1); a.y=clamp(a.y+fd.dy*a._eff.speed,0,WORLD-1);
+        events.push({type:'narr',sub:'flee',id:a.id,name:a.name,tick:state.tick,
+          text:`recule face à ${b.name} — sa réputation fait peur`}); continue;
+      }
+      if ((a.reputation||0) >= 3 && Math.random() < 0.25 && b.archetype!=='berserker') {
+        const fd = away(a,b); b.x=clamp(b.x+fd.dx*b._eff.speed,0,WORLD-1); b.y=clamp(b.y+fd.dy*b._eff.speed,0,WORLD-1);
+        events.push({type:'narr',sub:'flee',id:b.id,name:b.name,tick:state.tick,
+          text:`recule face à ${a.name} — sa réputation fait peur`}); continue;
+      }
+
+      // Traumatisé ne contre-attaque pas les 5 premiers ticks
+      const aPanic = a._mentalState==='traumatized'&&(state.tick-a._mentalStateTick)<5;
+      const bPanic = b._mentalState==='traumatized'&&(state.tick-b._mentalStateTick)<5;
+      if (aPanic) { const fd=away(b,a); a.x=clamp(a.x+fd.dx*a._eff.speed,0,WORLD-1); a.y=clamp(a.y+fd.dy*a._eff.speed,0,WORLD-1); continue; }
+      if (bPanic) { const fd=away(a,b); b.x=clamp(b.x+fd.dx*b._eff.speed,0,WORLD-1); b.y=clamp(b.y+fd.dy*b._eff.speed,0,WORLD-1); continue; }
+      // Désengagement survivor
+      if (a.archetype==='survivor'&&a.hp/a.maxHp>0.5&&Math.random()<0.45) {
+        const fd=away(b,a); a.x=clamp(a.x+fd.dx*a._eff.speed,0,WORLD-1); a.y=clamp(a.y+fd.dy*a._eff.speed,0,WORLD-1); continue;
+      }
+      if (b.archetype==='survivor'&&b.hp/b.maxHp>0.5&&Math.random()<0.45) {
+        const fd=away(a,b); b.x=clamp(b.x+fd.dx*b._eff.speed,0,WORLD-1); b.y=clamp(b.y+fd.dy*b._eff.speed,0,WORLD-1); continue;
       }
       const sA=a._eff, sB=b._eff;
       const bA=a._mentalState==='berserk'?4:a.archetype==='berserker'?2:0;
@@ -1163,6 +1356,15 @@ function tickSim(prev) {
       a._combatTicks=(a._combatTicks||0)+1; b._combatTicks=(b._combatTicks||0)+1;
       if (finalDmgA>0&&a._memory) a._memory.lastAttackerId=b.id;
       if (finalDmgB>0&&b._memory) b._memory.lastAttackerId=a.id;
+      // Fatigue de combat
+      a.fatigue = clamp((a.fatigue||0)+FATIGUE_COMBAT, 0, 100);
+      b.fatigue = clamp((b.fatigue||0)+FATIGUE_COMBAT, 0, 100);
+      // Blessure si coup lourd (malus speed durable)
+      if (finalDmgA > a.maxHp*0.15) a.buffs.push({stat:'speed',value:-1,ticks:WOUND_TICKS});
+      if (finalDmgB > b.maxHp*0.15) b.buffs.push({stat:'speed',value:-1,ticks:WOUND_TICKS});
+      // Mémoire de peur : si réduit à <30% → on se souvient de cet ennemi
+      if (a.hp/a.maxHp < 0.30) { b._fear=b._fear||{}; b._fear[a.id]=state.tick+40; }
+      if (b.hp/b.maxHp < 0.30) { a._fear=a._fear||{}; a._fear[b.id]=state.tick+40; }
       state.matchStats.totalCombats++;
       // Poison (hunter/survivor) et saignement (berserker) au toucher
       if (!dA&&finalDmgB>0&&a.archetype==='hunter'&&Math.random()<0.25&&!b.statusEffects?.some(se=>se.type==='poison'))
@@ -1187,23 +1389,39 @@ function tickSim(prev) {
         events.push({type:'narr',sub:'berserk',id:b.id,name:b.name,tick:state.tick,text:`entre en rage après un coup dévastateur !`});
       }
       if (a.hp<=0) {
-        b.simStats.kills++; if(b._memory)b._memory.lastAttackerId=null;
+        b.simStats.kills++;
+        b.reputation = (b.reputation||0)+1;
+        if(b._memory)b._memory.lastAttackerId=null;
         events.push({type:'death',champion:a.id,name:a.name,killedBy:b.id,killedByName:b.name});
         // Trauma pour témoins proches
-        alive.filter(x=>x.id!==a.id&&x.id!==b.id&&dist(x,a)<40&&x._mentalState==='normal').forEach(w=>{
+        alive.filter(x=>x.id!==a.id&&x.id!==b.id&&dist(x,a)<120&&x._mentalState==='normal').forEach(w=>{
           w._mentalState='traumatized'; w._mentalStateTick=state.tick;
           events.push({type:'narr',sub:'traumatized',id:w.id,name:w.name,tick:state.tick,
             text:`est traumatisé(e) d'avoir assisté à la mort de ${a.name}`});
         });
+        // Rancune des alliés du mort
+        const dalA = (state.alliances||[]).find(al=>al.ids.includes(a.id));
+        if (dalA) {
+          const allA = alive.find(c=>c.id===dalA.ids.find(id=>id!==a.id));
+          if (allA) { allA._grudge=allA._grudge||{}; allA._grudge[b.id]=(allA._grudge[b.id]||0)+2; }
+        }
       }
       if (b.hp<=0) {
-        a.simStats.kills++; if(a._memory)a._memory.lastAttackerId=null;
+        a.simStats.kills++;
+        a.reputation = (a.reputation||0)+1;
+        if(a._memory)a._memory.lastAttackerId=null;
         events.push({type:'death',champion:b.id,name:b.name,killedBy:a.id,killedByName:a.name});
-        alive.filter(x=>x.id!==b.id&&x.id!==a.id&&dist(x,b)<40&&x._mentalState==='normal').forEach(w=>{
+        alive.filter(x=>x.id!==b.id&&x.id!==a.id&&dist(x,b)<120&&x._mentalState==='normal').forEach(w=>{
           w._mentalState='traumatized'; w._mentalStateTick=state.tick;
           events.push({type:'narr',sub:'traumatized',id:w.id,name:w.name,tick:state.tick,
             text:`est traumatisé(e) d'avoir assisté à la mort de ${b.name}`});
         });
+        // Rancune des alliés du mort
+        const dalB = (state.alliances||[]).find(al=>al.ids.includes(b.id));
+        if (dalB) {
+          const allB = alive.find(c=>c.id===dalB.ids.find(id=>id!==b.id));
+          if (allB) { allB._grudge=allB._grudge||{}; allB._grudge[a.id]=(allB._grudge[a.id]||0)+2; }
+        }
       }
     }
   }
@@ -1260,7 +1478,7 @@ export default function SimulateurScreen() {
   const [cfg,       setCfg]       = useState({champCount:8, mapSize:'M', biome:null});
   const [sim,       setSim]       = useState(()=>createSimState());
   const [autoRun,   setAuto]      = useState(false);
-  const [speed,     setSpeed]     = useState(600);
+  const [speed,     setSpeed]     = useState(1500);
   const [selId,     setSelId]     = useState(null);
   const [tab,       setTab]       = useState('game');
   const [narrFilter,setNarrFilter]= useState(null);
@@ -1298,13 +1516,14 @@ export default function SimulateurScreen() {
         return s;
       });
       chunks++;
-      if (chunks < 12) setTimeout(runChunk, 0); // 12×100 = 1200 ticks max
+      if (chunks < 50) setTimeout(runChunk, 0); // 50×100 = 5000 ticks max
     };
     runChunk();
   },[]);
   const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)}); return s; }),[]);
-  const cycSpd = useCallback(()=>setSpeed(s=>s===1000?600:s===600?300:s===300?100:1000),[]);
+  const cycSpd = useCallback(()=>setSpeed(s=>s===1500?800:s===800?300:s===300?100:1500),[]);
 
+  const speedLabel = {1500:'🐢 Posé',800:'⚡ Normal',300:'🚀 Rapide',100:'⏩ Turbo'}[speed]||`${speed}ms`;
   const alive  = sim.champions.filter(c=>c.hp>0);
   const events = sim.events.slice(-20).reverse();
   const winner = sim.status==='finished' ? sim.champions.find(c=>c.id===sim.winner) : null;
@@ -1400,7 +1619,7 @@ export default function SimulateurScreen() {
             <Btn label={autoRun?'⏸ Pause':'▶ Auto'} onPress={()=>setAuto(a=>!a)} color={autoRun?'#c0392b':'#27ae60'} disabled={!active}/>
             <Btn label="⏩ ×10"  onPress={()=>turbo(10)} color="#8e44ad" disabled={!active}/>
             <Btn label="⏭ Fin"  onPress={finish}  color="#d35400" disabled={!active}/>
-            <Btn label={`${speed}ms`} onPress={cycSpd} color="#2c3e50" flex={0.85}/>
+            <Btn label={speedLabel} onPress={cycSpd} color="#2c3e50" flex={0.85}/>
             <Btn label="🔄" onPress={reset} color="#1a1a2e" flex={0.6}/>
           </View>
 
@@ -1488,6 +1707,31 @@ export default function SimulateurScreen() {
                 ):null;
               })}
 
+              {/* Survie */}
+              <Text style={s.ms}>SURVIE</Text>
+              <View style={s.sr}>
+                <Text style={s.sl}>🍗 Faim</Text>
+                <View style={s.st}><View style={[s.sb,{width:`${Math.round(sel.hunger??100)}%`,backgroundColor:'#e67e22'}]}/></View>
+                <Text style={s.sv}>{Math.round(sel.hunger??100)}</Text>
+              </View>
+              <View style={s.sr}>
+                <Text style={s.sl}>💧 Soif</Text>
+                <View style={s.st}><View style={[s.sb,{width:`${Math.round(sel.thirst??100)}%`,backgroundColor:'#3498db'}]}/></View>
+                <Text style={s.sv}>{Math.round(sel.thirst??100)}</Text>
+              </View>
+              <View style={s.sr}>
+                <Text style={s.sl}>😴 Fatigue</Text>
+                <View style={s.st}><View style={[s.sb,{width:`${Math.round(sel.fatigue??0)}%`,backgroundColor:'#8e44ad'}]}/></View>
+                <Text style={s.sv}>{Math.round(sel.fatigue??0)}</Text>
+              </View>
+              <View style={s.sr}>
+                <Text style={s.sl}>💛 Moral</Text>
+                <View style={s.st}><View style={[s.sb,{width:`${Math.round(sel.morale??80)}%`,backgroundColor:'#f1c40f'}]}/></View>
+                <Text style={s.sv}>{Math.round(sel.morale??80)}</Text>
+              </View>
+              {(sel.reputation||0)>0&&(
+                <Text style={[s.bl,{color:'#e74c3c'}]}>☠️ Réputation : {sel.reputation} kill{sel.reputation>1?'s':''} — craint par les autres</Text>
+              )}
               {/* Stats */}
               <Text style={s.ms}>STATISTIQUES</Text>
               {Object.entries(sel.stats).map(([k,v])=>(
@@ -1636,7 +1880,8 @@ function NarrCard({e,champs}) {
                exhausted:'😴',fire_damage:'🔥',cold_snap:'❄️',
                ability:'⚡',poison:'☠️',bleed:'🩸',stun_end:'💫',
                hunger:'🍗',thirst:'💧',temperature:'🌡️',water:'🌊',
-               fauna_attack:'🐺',hunt:'🏹',loot_weapon:'⚔️'}[sub]||'📌';
+               fauna_attack:'🐺',hunt:'🏹',loot_weapon:'⚔️',
+               flee:'🏃',survival:'💀'}[sub]||'📌';
   const bg  = NARR_COLORS[sub]||'#111122';
   const ts  = e.tick!=null ? tickLabel(e.tick) : '—';
   return (

@@ -105,35 +105,37 @@ const CRAFT_RECIPES = [
 // type: 'pos' = vert, 'neg' = rouge, 'neu' = ambre
 // statMod: modifs permanentes aux stats à la création
 // hpMod: modif permanente du HP max
+// cost: coût en points de build (pos = négatif, neg = positif ~½ de l'inverse)
+const BASE_TRAIT_POINTS = 2; // budget de départ — doit finir à 0
 const TRAITS = {
-  // ── Positifs ────────────────────────────────────────────────────────
-  athlete:       { label:'Athlète',          icon:'🏃', type:'pos', statMod:{speed:+1,endurance:+1} },
-  strong:        { label:'Costaud',          icon:'💪', type:'pos', statMod:{strength:+2}, hpMod:+30 },
-  fast_healer:   { label:'Guérison rapide',  icon:'🩹', type:'pos' },
-  eagle_eye:     { label:'Œil de faucon',    icon:'🦅', type:'pos', statMod:{instinct:+1} },
-  forager:       { label:'Cueilleur',        icon:'🌿', type:'pos', statMod:{survival:+1} },
-  light_eater:   { label:'Petit appétit',    icon:'🥗', type:'pos' },
-  hydrated:      { label:'Économe en eau',   icon:'💧', type:'pos' },
-  night_owl:     { label:'Nocturne',         icon:'🦉', type:'pos' },
-  lucky:         { label:'Chanceux',         icon:'🍀', type:'pos' },
-  honorable:     { label:'Honorable',        icon:'⚜️', type:'pos' },
-  // ── Négatifs ────────────────────────────────────────────────────────
-  anxious:       { label:'Anxieux',          icon:'😰', type:'neg' },
-  heavy_eater:   { label:'Gros mangeur',     icon:'🍖', type:'neg' },
-  thirsty_trait: { label:'Assoiffé',         icon:'🫗', type:'neg' },
-  lazy:          { label:'Paresseux',        icon:'😴', type:'neg' },
-  fragile:       { label:'Fragile',          icon:'🦴', type:'neg', hpMod:-50 },
-  slow_trait:    { label:'Lent',             icon:'🐌', type:'neg', statMod:{speed:-2} },
-  shortsighted:  { label:'Myope',            icon:'👓', type:'neg' },
-  hemophiliac:   { label:'Hémophile',        icon:'🩸', type:'neg' },
-  impulsive:     { label:'Impulsif',         icon:'😤', type:'neg' },
-  cold_sensitive:{ label:'Frileux',          icon:'🥶', type:'neg' },
+  // ── Positifs (coûtent des points) ───────────────────────────────────
+  athlete:       { label:'Athlète',          icon:'🏃', type:'pos', cost:-3, statMod:{speed:+1,endurance:+1} },
+  strong:        { label:'Costaud',          icon:'💪', type:'pos', cost:-4, statMod:{strength:+2}, hpMod:+30 },
+  fast_healer:   { label:'Guérison rapide',  icon:'🩹', type:'pos', cost:-3 },
+  eagle_eye:     { label:'Œil de faucon',    icon:'🦅', type:'pos', cost:-2, statMod:{instinct:+1} },
+  forager:       { label:'Cueilleur',        icon:'🌿', type:'pos', cost:-2, statMod:{survival:+1} },
+  light_eater:   { label:'Petit appétit',    icon:'🥗', type:'pos', cost:-2 },
+  hydrated:      { label:'Économe en eau',   icon:'💧', type:'pos', cost:-2 },
+  night_owl:     { label:'Nocturne',         icon:'🦉', type:'pos', cost:-3 },
+  lucky:         { label:'Chanceux',         icon:'🍀', type:'pos', cost:-4 },
+  honorable:     { label:'Honorable',        icon:'⚜️', type:'pos', cost:-1 },
+  // ── Négatifs (redonnent des points — ~moitié de l'inverse) ──────────
+  anxious:       { label:'Anxieux',          icon:'😰', type:'neg', cost:+1 },
+  heavy_eater:   { label:'Gros mangeur',     icon:'🍖', type:'neg', cost:+1 },
+  thirsty_trait: { label:'Assoiffé',         icon:'🫗', type:'neg', cost:+1 },
+  lazy:          { label:'Paresseux',        icon:'😴', type:'neg', cost:+1 },
+  fragile:       { label:'Fragile',          icon:'🦴', type:'neg', cost:+2, hpMod:-50 },
+  slow_trait:    { label:'Lent',             icon:'🐌', type:'neg', cost:+2, statMod:{speed:-2} },
+  shortsighted:  { label:'Myope',            icon:'👓', type:'neg', cost:+1 },
+  hemophiliac:   { label:'Hémophile',        icon:'🩸', type:'neg', cost:+2 },
+  impulsive:     { label:'Impulsif',         icon:'😤', type:'neg', cost:+2 },
+  cold_sensitive:{ label:'Frileux',          icon:'🥶', type:'neg', cost:+1 },
   // ── Ambivalents (avantage ET inconvénient) ──────────────────────────
-  paranoid:      { label:'Paranoïaque',      icon:'👁', type:'neu' },
-  loner:         { label:'Solitaire',        icon:'🌑', type:'neu' },
-  bloodthirsty:  { label:'Sanguinaire',      icon:'💀', type:'neu' },
-  protector:     { label:'Protecteur',       icon:'🫂', type:'neu' },
-  gladiator:     { label:'Gladiateur',       icon:'🗡', type:'neu', statMod:{strength:+1,defense:-1} },
+  paranoid:      { label:'Paranoïaque',      icon:'👁', type:'neu', cost: 0 },
+  loner:         { label:'Solitaire',        icon:'🌑', type:'neu', cost: 0 },
+  bloodthirsty:  { label:'Sanguinaire',      icon:'💀', type:'neu', cost:-1 },
+  protector:     { label:'Protecteur',       icon:'🫂', type:'neu', cost: 0 },
+  gladiator:     { label:'Gladiateur',       icon:'🗡', type:'neu', cost:-1, statMod:{strength:+1,defense:-1} },
 };
 const TRAIT_KEYS  = Object.keys(TRAITS);
 const TRAIT_INCOMPAT = [
@@ -142,6 +144,10 @@ const TRAIT_INCOMPAT = [
   ['hydrated','thirsty_trait'],['loner','protector'],
   ['honorable','bloodthirsty'],['night_owl','shortsighted'],
 ];
+// Points restants dans le budget de build (doit finir à 0)
+function traitsRemainingPoints(selected) {
+  return BASE_TRAIT_POINTS + selected.reduce((s,t)=>s+(TRAITS[t]?.cost||0),0);
+}
 
 // ── Progression XP / Niveaux ──────────────────────────────────────────────
 const XP_PER_TICK  = 0.3;   // gain passif par tick de survie
@@ -299,30 +305,33 @@ function craftSuccessChance(champ, recipe) {
 }
 
 // ── Helpers traits / progression ─────────────────────────────────────────
+// Génère aléatoirement des traits dont le coût total équilibre le budget à 0
+// (style Project Zomboid : positifs coûtent, négatifs ~½ remboursent)
 function pickTraits() {
-  const neg = TRAIT_KEYS.filter(k=>TRAITS[k].type==='neg');
-  const pos = TRAIT_KEYS.filter(k=>TRAITS[k].type==='pos');
-  const neu = TRAIT_KEYS.filter(k=>TRAITS[k].type==='neu');
+  const isIncompat = (key, selected) =>
+    TRAIT_INCOMPAT.some(pair => pair.includes(key) && selected.some(e => pair.includes(e)));
 
-  // Style PZ : biais vers les négatifs, parfois un positif compensateur
-  const pickOne = (exclude=[]) => {
-    const r = Math.random();
-    // 55% négatif, 28% positif, 17% neutre
-    const pool = (r<0.55?neg:r<0.83?pos:neu).filter(k=>
-      !exclude.includes(k) &&
-      !TRAIT_INCOMPAT.some(pair=>pair.includes(k)&&exclude.some(e=>pair.includes(e)))
-    );
-    return pool.length ? pool[rng(0,pool.length-1)] : null;
-  };
+  for (let attempt = 0; attempt < 300; attempt++) {
+    // Mélange aléatoire de tous les traits
+    const shuffled = [...TRAIT_KEYS].sort(() => Math.random() - 0.5);
+    const result = [];
 
-  // 15% = 1 trait, 55% = 2 traits, 30% = 3 traits
-  const count = Math.random()<0.15 ? 1 : Math.random()<0.64 ? 2 : 3;
-  const result = [];
-  for (let i=0; i<count; i++) {
-    const t = pickOne(result);
-    if (t) result.push(t);
+    for (const key of shuffled) {
+      if (result.length >= 4) break;
+      if (isIncompat(key, result)) continue;
+      // Vérifier que le budget ne passe pas en négatif
+      const tentativePts = BASE_TRAIT_POINTS +
+        [...result, key].reduce((s,t)=>s+(TRAITS[t].cost||0), 0);
+      if (tentativePts < 0) continue;
+      result.push(key);
+      if (tentativePts === 0) break; // budget équilibré !
+    }
+
+    if (traitsRemainingPoints(result) === 0 && result.length > 0) return result;
   }
-  return result.length ? result : [neg[rng(0,neg.length-1)]];
+
+  // Fallback garanti : eagle_eye seul → 2 + (-2) = 0
+  return ['eagle_eye'];
 }
 
 function levelUpChamp(c, tick, events) {
@@ -345,13 +354,13 @@ function checkLevelUp(c, tick, events) {
 }
 
 // ── Make champion ─────────────────────────────────────────────────────────
-function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
+function makeChamp(id, name, colorIdx, spawnRange=[200,700], forcedTraits=null) {
   const [sMin,sMax]=spawnRange;
   const stats = {
     strength:rng(3,8), speed:rng(3,8), defense:rng(2,6),
     endurance:rng(3,7), instinct:rng(2,7), survival:rng(2,7),
   };
-  const traits = pickTraits();
+  const traits = forcedTraits && forcedTraits.length > 0 ? forcedTraits : pickTraits();
   // Appliquer les modificateurs de stats des traits à la création
   traits.forEach(t => {
     const def = TRAITS[t];
@@ -445,7 +454,8 @@ function createSimState(cfg={}) {
   const names      = (cfg.champNames||CHAMP_NAMES).slice(0,count);
   const sizeCfg    = MAP_SIZES[cfg.mapSize||'M'];
   const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne'][rng(0,4)];
-  const champs     = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn));
+  const champs     = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn,
+    cfg.champBuilds?.[i]?.traits || null));
   const faunaCount = 22 + count * 2;
   const floraCount = 40 + count * 3;
   return {
@@ -2236,14 +2246,17 @@ const BIOMES = [null,'forêt','désert','toundra','marais','montagne'];
 const BIOME_ICONS = {null:'🎲','forêt':'🌲','désert':'🏜️','toundra':'❄️','marais':'🌿','montagne':'⛰️'};
 
 function ConfigScreen({onStart}) {
-  const [count,    setCount]  = useState(8);
-  const [mapSize,  setMapSz]  = useState('M');
-  const [biome,    setBiome]  = useState(null);
-  const [names,    setNames]  = useState([...CHAMP_NAMES.slice(0,8)]);
-  const [editIdx,  setEditIdx]= useState(null);
-  const [editVal,  setEditVal]= useState('');
+  const [count,       setCount]      = useState(8);
+  const [mapSize,     setMapSz]      = useState('M');
+  const [biome,       setBiome]      = useState(null);
+  const [names,       setNames]      = useState([...CHAMP_NAMES.slice(0,8)]);
+  const [editIdx,     setEditIdx]    = useState(null);
+  const [editVal,     setEditVal]    = useState('');
+  // builds[i] = { traits: string[] } — un build par champion
+  const [builds,      setBuilds]     = useState(()=>Array.from({length:8},()=>({traits:pickTraits()})));
+  const [traitPicker, setTraitPicker]= useState(null); // index du champion en cours d'édition
 
-  // Sync names array when count changes
+  // Sync names + builds quand le count change
   const changeCount = v => {
     setCount(v);
     setNames(prev => {
@@ -2251,9 +2264,41 @@ function ConfigScreen({onStart}) {
       while(next.length<v) next.push(CHAMP_NAMES[next.length]||`Tribut${next.length+1}`);
       return next.slice(0,v);
     });
+    setBuilds(prev => {
+      const next=[...prev];
+      while(next.length<v) next.push({traits:pickTraits()});
+      return next.slice(0,v);
+    });
   };
 
-  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names});
+  // Basculer un trait dans le build d'un champion
+  const toggleTrait = (champIdx, traitKey) => {
+    setBuilds(prev => {
+      const next = prev.map((b,i)=>{
+        if (i !== champIdx) return b;
+        const sel = b.traits;
+        if (sel.includes(traitKey)) {
+          // Retirer le trait
+          return {...b, traits: sel.filter(t=>t!==traitKey)};
+        }
+        // Ajouter le trait — vérifications
+        const tentative = [...sel, traitKey];
+        const pts = BASE_TRAIT_POINTS + tentative.reduce((s,t)=>s+(TRAITS[t].cost||0),0);
+        const incompat = TRAIT_INCOMPAT.some(pair=>
+          pair.includes(traitKey) && sel.some(e=>pair.includes(e)));
+        if (incompat) return b; // incompatible, on ignore
+        if (pts < 0)  return b; // budget dépassé, on ignore
+        return {...b, traits: tentative};
+      });
+      return next;
+    });
+  };
+
+  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names, champBuilds:builds});
+
+  // Données du picker actuellement ouvert
+  const pickerBuild = traitPicker !== null ? builds[traitPicker] : null;
+  const pickerPts   = pickerBuild ? traitsRemainingPoints(pickerBuild.traits) : 0;
 
   return (
     <ScrollView style={cs.root} contentContainerStyle={cs.scroll}>
@@ -2319,10 +2364,162 @@ function ConfigScreen({onStart}) {
         ))}
       </View>
 
+      {/* ── Traits des tributs ───────────────────────────────────────── */}
+      <Text style={cs.sec}>TRAITS DES TRIBUTS <Text style={cs.secSub}>(budget : {BASE_TRAIT_POINTS} pts → 0)</Text></Text>
+      {names.map((n,i) => {
+        const pts = traitsRemainingPoints(builds[i]?.traits||[]);
+        const balanced = pts === 0;
+        return (
+          <View key={i} style={cs.buildRow}>
+            <View style={cs.buildLeft}>
+              <View style={[cs.nameDot,{backgroundColor:CHAMP_COLORS[i%CHAMP_COLORS.length]}]}/>
+              <Text style={cs.buildName}>{n}</Text>
+              <Text style={[cs.buildPts, balanced ? cs.buildPtsOk : cs.buildPtsKo]}>
+                {balanced ? '✓ 0' : (pts > 0 ? `+${pts}` : `${pts}`)}
+              </Text>
+            </View>
+            <View style={cs.buildTraits}>
+              {(builds[i]?.traits||[]).map(t=>(
+                <View key={t} style={[cs.tBadge,
+                  TRAITS[t].type==='pos' ? cs.tPos :
+                  TRAITS[t].type==='neg' ? cs.tNeg : cs.tNeu]}>
+                  <Text style={cs.tBadgeIco}>{TRAITS[t].icon}</Text>
+                  <Text style={cs.tBadgeLbl}>{TRAITS[t].label}</Text>
+                </View>
+              ))}
+              {(!builds[i]?.traits?.length) &&
+                <Text style={cs.buildNone}>Aucun trait</Text>}
+            </View>
+            <TouchableOpacity style={cs.buildEdit} onPress={()=>setTraitPicker(i)}>
+              <Text style={cs.buildEditTxt}>✎</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
+
       <TouchableOpacity style={cs.launch} onPress={launch}>
         <Text style={cs.launchTxt}>⚔️  LANCER LA PARTIE  ⚔️</Text>
         <Text style={cs.launchSub}>{count} tributs · Carte {mapSize} · {biome||'Biome aléatoire'}</Text>
       </TouchableOpacity>
+
+      {/* ── Modal sélecteur de traits ────────────────────────────────── */}
+      <Modal visible={traitPicker !== null} transparent animationType="slide"
+        onRequestClose={()=>setTraitPicker(null)}>
+        <View style={cs.tpBg}>
+          <View style={cs.tpBox}>
+            {/* En-tête */}
+            <View style={cs.tpHead}>
+              {traitPicker !== null && (
+                <View style={[cs.nameDot,{backgroundColor:CHAMP_COLORS[traitPicker%CHAMP_COLORS.length],width:12,height:12,borderRadius:6}]}/>
+              )}
+              <Text style={cs.tpTitle}>
+                {traitPicker !== null ? names[traitPicker] : ''}
+              </Text>
+              <View style={[cs.tpBudget, pickerPts===0 ? cs.tpBudgetOk : pickerPts>0 ? cs.tpBudgetOver : cs.tpBudgetKo]}>
+                <Text style={cs.tpBudgetTxt}>
+                  {pickerPts === 0 ? '✓ Équilibré' : pickerPts > 0 ? `+${pickerPts} à dépenser` : `${pickerPts} dépassé!`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={()=>setTraitPicker(null)} style={cs.tpClose}>
+                <Text style={cs.tpCloseTxt}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={cs.tpHint}>
+              Budget : {BASE_TRAIT_POINTS} pts de base · Positifs coûtent · Négatifs remboursent (~½)
+            </Text>
+
+            <ScrollView style={cs.tpScroll} showsVerticalScrollIndicator={false}>
+              {/* Positifs */}
+              <Text style={cs.tpSec}>✅ POSITIFS</Text>
+              <View style={cs.tpGrid}>
+                {TRAIT_KEYS.filter(k=>TRAITS[k].type==='pos').map(k=>{
+                  const t = TRAITS[k];
+                  const sel = pickerBuild?.traits?.includes(k);
+                  const incompat = TRAIT_INCOMPAT.some(pair=>
+                    pair.includes(k) && (pickerBuild?.traits||[]).filter(e=>e!==k).some(e=>pair.includes(e)));
+                  const wouldOverflow = !sel && (pickerPts + t.cost) < 0;
+                  const disabled = !sel && (incompat || wouldOverflow);
+                  return (
+                    <TouchableOpacity key={k}
+                      style={[cs.tpTrait, sel ? cs.tpSel : cs.tpUnsel, disabled && cs.tpDisabled]}
+                      onPress={()=>!disabled && toggleTrait(traitPicker, k)}>
+                      <Text style={cs.tpIco}>{t.icon}</Text>
+                      <Text style={[cs.tpLbl, sel && cs.tpLblSel, disabled && cs.tpLblDis]}>{t.label}</Text>
+                      <Text style={[cs.tpCost, t.cost < 0 ? cs.tpCostPos : cs.tpCostNeg]}>
+                        {t.cost > 0 ? `+${t.cost}` : `${t.cost}`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Négatifs */}
+              <Text style={cs.tpSec}>❌ NÉGATIFS</Text>
+              <View style={cs.tpGrid}>
+                {TRAIT_KEYS.filter(k=>TRAITS[k].type==='neg').map(k=>{
+                  const t = TRAITS[k];
+                  const sel = pickerBuild?.traits?.includes(k);
+                  const incompat = TRAIT_INCOMPAT.some(pair=>
+                    pair.includes(k) && (pickerBuild?.traits||[]).filter(e=>e!==k).some(e=>pair.includes(e)));
+                  const disabled = !sel && incompat;
+                  return (
+                    <TouchableOpacity key={k}
+                      style={[cs.tpTrait, sel ? cs.tpSelNeg : cs.tpUnsel, disabled && cs.tpDisabled]}
+                      onPress={()=>!disabled && toggleTrait(traitPicker, k)}>
+                      <Text style={cs.tpIco}>{t.icon}</Text>
+                      <Text style={[cs.tpLbl, sel && cs.tpLblSel, disabled && cs.tpLblDis]}>{t.label}</Text>
+                      <Text style={[cs.tpCost, cs.tpCostNeg]}>+{t.cost}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Ambivalents */}
+              <Text style={cs.tpSec}>⚖️ AMBIVALENTS</Text>
+              <View style={cs.tpGrid}>
+                {TRAIT_KEYS.filter(k=>TRAITS[k].type==='neu').map(k=>{
+                  const t = TRAITS[k];
+                  const sel = pickerBuild?.traits?.includes(k);
+                  const incompat = TRAIT_INCOMPAT.some(pair=>
+                    pair.includes(k) && (pickerBuild?.traits||[]).filter(e=>e!==k).some(e=>pair.includes(e)));
+                  const wouldOverflow = !sel && t.cost < 0 && (pickerPts + t.cost) < 0;
+                  const disabled = !sel && (incompat || wouldOverflow);
+                  return (
+                    <TouchableOpacity key={k}
+                      style={[cs.tpTrait, sel ? cs.tpSelNeu : cs.tpUnsel, disabled && cs.tpDisabled]}
+                      onPress={()=>!disabled && toggleTrait(traitPicker, k)}>
+                      <Text style={cs.tpIco}>{t.icon}</Text>
+                      <Text style={[cs.tpLbl, sel && cs.tpLblSel, disabled && cs.tpLblDis]}>{t.label}</Text>
+                      <Text style={[cs.tpCost, t.cost===0 ? cs.tpCostNeu : t.cost<0 ? cs.tpCostPos : cs.tpCostNeg]}>
+                        {t.cost===0 ? '0' : t.cost>0 ? `+${t.cost}` : `${t.cost}`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            {/* Boutons bas */}
+            <View style={cs.tpFoot}>
+              <TouchableOpacity style={cs.tpRandom} onPress={()=>{
+                if (traitPicker !== null) {
+                  setBuilds(prev => prev.map((b,i)=>i===traitPicker ? {traits:pickTraits()} : b));
+                }
+              }}>
+                <Text style={cs.tpRandomTxt}>🎲 Aléatoire</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[cs.tpConfirm, pickerPts!==0 && cs.tpConfirmDis]}
+                onPress={()=>{ if(pickerPts===0) setTraitPicker(null); }}>
+                <Text style={cs.tpConfirmTxt}>
+                  {pickerPts===0 ? '✓ Confirmer' : `Équilibrez (${pickerPts>0?'+':''}${pickerPts})`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -2532,4 +2729,70 @@ const cs = StyleSheet.create({
   launch:{backgroundColor:'#e2b96f',borderRadius:14,paddingVertical:16,alignItems:'center',marginTop:28},
   launchTxt:{color:'#0d0d1a',fontWeight:'bold',fontSize:15,letterSpacing:2},
   launchSub:{color:'#0d0d1a99',fontSize:10,marginTop:4},
+
+  // ── Trait builds list ──────────────────────────────────────────────
+  buildRow:{flexDirection:'row',alignItems:'center',backgroundColor:'#111122',
+    borderRadius:10,padding:8,marginBottom:6,borderWidth:1,borderColor:'#1a1a2e',gap:6},
+  buildLeft:{flexDirection:'row',alignItems:'center',gap:6,minWidth:110},
+  buildName:{color:'#ccc',fontSize:11,fontWeight:'bold',flex:1},
+  buildPts:{fontSize:10,fontWeight:'bold',minWidth:28,textAlign:'right'},
+  buildPtsOk:{color:'#2ecc71'},
+  buildPtsKo:{color:'#e74c3c'},
+  buildTraits:{flex:1,flexDirection:'row',flexWrap:'wrap',gap:4},
+  buildNone:{color:'#333',fontSize:10,fontStyle:'italic'},
+  buildEdit:{backgroundColor:'#1a1a2e',borderRadius:7,padding:7,borderWidth:1,borderColor:'#2a2a4a'},
+  buildEditTxt:{color:'#666',fontSize:12},
+  // trait mini badges in build row
+  tBadge:{flexDirection:'row',alignItems:'center',borderRadius:10,
+    paddingHorizontal:6,paddingVertical:2,gap:2},
+  tPos:{backgroundColor:'#0d2a0d',borderWidth:1,borderColor:'#2ecc7133'},
+  tNeg:{backgroundColor:'#2a0d0d',borderWidth:1,borderColor:'#e74c3c33'},
+  tNeu:{backgroundColor:'#1a1a0d',borderWidth:1,borderColor:'#f39c1233'},
+  tBadgeIco:{fontSize:10},
+  tBadgeLbl:{color:'#aaa',fontSize:9,fontWeight:'bold'},
+
+  // ── Trait picker modal ─────────────────────────────────────────────
+  tpBg:{flex:1,backgroundColor:'#000000cc',justifyContent:'flex-end'},
+  tpBox:{backgroundColor:'#111122',borderTopLeftRadius:20,borderTopRightRadius:20,
+    borderWidth:1,borderColor:'#2a2a4a',maxHeight:'88%'},
+  tpHead:{flexDirection:'row',alignItems:'center',padding:14,gap:8,
+    borderBottomWidth:1,borderColor:'#1a1a2e'},
+  tpTitle:{color:'#fff',fontSize:16,fontWeight:'bold',flex:1},
+  tpBudget:{borderRadius:8,paddingHorizontal:8,paddingVertical:4},
+  tpBudgetOk:{backgroundColor:'#0d2a0d',borderWidth:1,borderColor:'#2ecc71'},
+  tpBudgetOver:{backgroundColor:'#1a1a0d',borderWidth:1,borderColor:'#f39c12'},
+  tpBudgetKo:{backgroundColor:'#2a0d0d',borderWidth:1,borderColor:'#e74c3c'},
+  tpBudgetTxt:{fontSize:11,fontWeight:'bold',color:'#fff'},
+  tpClose:{backgroundColor:'#1a1a2e',borderRadius:16,width:28,height:28,
+    alignItems:'center',justifyContent:'center'},
+  tpCloseTxt:{color:'#666',fontSize:14},
+  tpHint:{color:'#333',fontSize:9,paddingHorizontal:14,paddingVertical:6,
+    letterSpacing:0.5},
+  tpScroll:{paddingHorizontal:12},
+  tpSec:{color:'#444',fontSize:9,letterSpacing:3,marginTop:14,marginBottom:6,
+    paddingHorizontal:2},
+  tpGrid:{flexDirection:'row',flexWrap:'wrap',gap:7},
+  tpTrait:{flexDirection:'row',alignItems:'center',borderRadius:10,
+    paddingHorizontal:8,paddingVertical:6,gap:5,borderWidth:1,
+    minWidth:'45%',maxWidth:'48%',flex:1},
+  tpUnsel:{backgroundColor:'#1a1a2e',borderColor:'#2a2a4a'},
+  tpSel:{backgroundColor:'#0d2a0d',borderColor:'#2ecc71'},
+  tpSelNeg:{backgroundColor:'#2a0d0d',borderColor:'#e74c3c'},
+  tpSelNeu:{backgroundColor:'#1a1a0d',borderColor:'#f39c12'},
+  tpDisabled:{opacity:0.25},
+  tpIco:{fontSize:16},
+  tpLbl:{color:'#888',fontSize:11,fontWeight:'bold',flex:1},
+  tpLblSel:{color:'#fff'},
+  tpLblDis:{color:'#333'},
+  tpCost:{fontSize:10,fontWeight:'bold',minWidth:22,textAlign:'right'},
+  tpCostPos:{color:'#e74c3c'},   // coûte (négatif pour budget)
+  tpCostNeg:{color:'#2ecc71'},   // rembourse (positif pour budget)
+  tpCostNeu:{color:'#666'},
+  tpFoot:{flexDirection:'row',gap:10,padding:14,borderTopWidth:1,borderColor:'#1a1a2e'},
+  tpRandom:{flex:1,backgroundColor:'#1a1a2e',borderRadius:10,paddingVertical:12,
+    alignItems:'center',borderWidth:1,borderColor:'#2a2a4a'},
+  tpRandomTxt:{color:'#888',fontWeight:'bold',fontSize:13},
+  tpConfirm:{flex:2,backgroundColor:'#e2b96f',borderRadius:10,paddingVertical:12,alignItems:'center'},
+  tpConfirmDis:{backgroundColor:'#333',opacity:0.5},
+  tpConfirmTxt:{color:'#0d0d1a',fontWeight:'bold',fontSize:13},
 });

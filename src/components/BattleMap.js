@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, FillType,
+  PaintStyle,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -134,9 +134,12 @@ function clientHeightMap(biome, seed) {
         tw += w; th += p.h * w;
       });
       let elev = th / tw + (rng() - 0.5) * 0.9;
+      // Île : bords forcés en eau (h=0)
       const edge = Math.min(gx, gy, HM_CELLS - 1 - gx, HM_CELLS - 1 - gy);
-      if (edge < 3) elev = Math.min(elev, 2 + edge);
-      hm[gy][gx] = Math.max(1, Math.min(7, Math.round(elev)));
+      if (edge === 0) elev = 0;
+      else if (edge === 1) elev = Math.min(elev, 1);
+      else if (edge === 2) elev = Math.min(elev, 2);
+      hm[gy][gx] = Math.max(0, Math.min(7, Math.round(elev)));
     }
   }
   if (cfg.water) {
@@ -375,14 +378,26 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm) {
               isFollowed ? 2.2*sc : 1.2*sc,
               (isFollowed ? 1.0 : 0.45) * baseA));
 
-  // ── Barre HP ──────────────────────────────────────────────────────────────
-  const bw = 22*sc, bh = 2.8*sc;
+  // ── Barres HP + survie ────────────────────────────────────────────────────
+  const bw = 22*sc, bh = 2.6*sc;
   const bx  = sx - bw / 2;
-  const by  = headY - headR - 7*sc;
+  const by  = headY - headR - (cv.hunger!=null ? 12*sc : 7*sc);
+
+  // HP
   canvas.drawRect(Skia.XYWHRect(bx - 1, by - 1, bw + 2, bh + 2), mkAlpha('#000000', 0.72));
   const hpRatio = Math.max(0, cv.hp / cv.maxHp);
   const barC    = hpRatio > 0.6 ? '#2ecc71' : hpRatio > 0.3 ? '#f39c12' : '#e74c3c';
   canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh), mkFill(barC));
+
+  // Faim (orange) + soif (bleu) — affichées si le champion a ces attributs
+  if (cv.hunger != null) {
+    const by2 = by + bh + 1.2*sc;
+    const by3 = by2 + bh + 1.0*sc;
+    canvas.drawRect(Skia.XYWHRect(bx-1, by2-1, bw+2, bh+2), mkAlpha('#000000', 0.60));
+    canvas.drawRect(Skia.XYWHRect(bx,   by2,   bw * Math.max(0, cv.hunger/100), bh), mkAlpha('#e67e22', 0.88));
+    canvas.drawRect(Skia.XYWHRect(bx-1, by3-1, bw+2, bh+2), mkAlpha('#000000', 0.60));
+    canvas.drawRect(Skia.XYWHRect(bx,   by3,   bw * Math.max(0, cv.thirst/100), bh), mkAlpha('#3498db', 0.88));
+  }
 
   // ── Nom (zoom fort) ───────────────────────────────────────────────────────
   if (zoom > 1.6 && fm) {
@@ -451,22 +466,64 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     ci++;
   }
 
-  // ── Colis (supply drops) ──────────────────────────────────────────────────
-  (v.supplies || []).forEach(s => {
-    const sh  = hm ? getElev(s.x, s.y, hm) : 1;
-    const { ix, iy } = wToIso(s.x, s.y, sh + 0.6);
+  // ── Colis (supply drops + loots avec animation de chute) ─────────────────
+  const WEAPON_COLORS = { sword:'#bdc3c7', spear:'#95a5a6', bow:'#8e44ad', shield:'#7f8c8d' };
+  const allDrops = [...(v.supplies || []), ...(v.loots || [])];
+  allDrops.forEach(s => {
+    const sh   = hm ? getElev(s.x, s.y, hm) : 1;
+    // Animation de chute : if _dropTick and tick, compute fall offset
+    const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
+    const fallH    = tickDiff < 6 ? Math.max(0, sh + 5 - tickDiff * 1.2) : sh + 0.6;
+    const { ix, iy } = wToIso(s.x, s.y, fallH);
     const sx2 = W / 2 + (ix - camIx) * zoom;
     const sy2 = H / 2 + (iy - camIy) * zoom;
-    const r2  = Math.max(3, zoom * 1.6);
-    const col = SUPPLY_COLORS[s.type] || '#ffffff';
+    if (sx2 < -20 || sx2 > W+20 || sy2 < -20 || sy2 > H+20) return;
+    const col = WEAPON_COLORS[s.type] || SUPPLY_COLORS[s.type] || '#ffffff';
+    const r2  = Math.max(3, zoom * 1.8);
+    const isWeapon = !!WEAPON_COLORS[s.type];
+
+    // Ombre portée (chute)
+    if (tickDiff < 6 && fallH > sh + 0.8) {
+      const shh = hm ? getElev(s.x, s.y, hm) : 1;
+      const { ix:six2, iy:siy2 } = wToIso(s.x, s.y, shh);
+      const shdx = W/2 + (six2 - camIx) * zoom;
+      const shdy = H/2 + (siy2 - camIy) * zoom;
+      const shadowA = Math.max(0.05, 0.4 - tickDiff * 0.06);
+      canvas.drawCircle(shdx, shdy, r2 * (1 + tickDiff * 0.4), mkAlpha('#000000', shadowA));
+    }
+
+    // Halo coloré
     canvas.drawCircle(sx2, sy2, r2 * 3.2, mkAlpha(col, 0.20));
-    canvas.save();
-    canvas.translate(sx2, sy2);
-    canvas.rotate(t * 24);
-    const dp = Skia.Path.Make();
-    dp.moveTo(0,-r2); dp.lineTo(r2,0); dp.lineTo(0,r2); dp.lineTo(-r2,0); dp.close();
-    canvas.drawPath(dp, mkFill(col));
-    canvas.restore();
+
+    if (isWeapon) {
+      // Arme : losange avec croix centrale
+      canvas.save();
+      canvas.translate(sx2, sy2);
+      canvas.rotate(t * 18);
+      const dp = Skia.Path.Make();
+      dp.moveTo(0, -r2*1.4); dp.lineTo(r2*1.4, 0); dp.lineTo(0, r2*1.4); dp.lineTo(-r2*1.4, 0); dp.close();
+      canvas.drawPath(dp, mkAlpha(col, 0.90));
+      canvas.restore();
+      canvas.drawCircle(sx2, sy2, r2 * 0.55, mkAlpha('#ffffff', 0.55));
+    } else {
+      // Colis classique : diamant
+      canvas.save();
+      canvas.translate(sx2, sy2);
+      canvas.rotate(t * 24);
+      const dp = Skia.Path.Make();
+      dp.moveTo(0, -r2); dp.lineTo(r2, 0); dp.lineTo(0, r2); dp.lineTo(-r2, 0); dp.close();
+      canvas.drawPath(dp, mkFill(col));
+      canvas.restore();
+    }
+
+    // Ligne de descente (loot en chute)
+    if (tickDiff < 4 && fallH > sh + 1) {
+      const { ix:grix, iy:griy } = wToIso(s.x, s.y, sh + 0.6);
+      const grsx = W/2 + (grix - camIx)*zoom, grsy = H/2 + (griy - camIy)*zoom;
+      const lineP = Skia.Path.Make();
+      lineP.moveTo(sx2, sy2); lineP.lineTo(grsx, grsy);
+      canvas.drawPath(lineP, mkStrokeA(col, 1.2, 0.35));
+    }
   });
 
   // ── Lignes d'alliance ─────────────────────────────────────────────────────
@@ -484,27 +541,37 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     canvas.drawPath(alPath, mkStrokeA('#e2b96f', 1.5, 0.40));
   });
 
-  // ── Zone mortelle ──────────────────────────────────────────────────────────
-  const zone = v.zone;
-  if (zone) {
-    const { ix:zix, iy:ziy } = wToIso(zone.cx, zone.cy, 0);
-    const zcx = W/2 + (zix - camIx) * zoom;
-    const zcy = H/2 + (ziy - camIy) * zoom;
-    // Rayon en px iso : zone.radius unités monde → TILE_W/2/HM_CELL * radius
-    const zr  = zone.radius * (TILE_W / 2 / HM_CELL) * zoom;
-    const pulse = 0.5 + Math.sin(t * 3.5) * 0.3;
-
-    const zonePath = Skia.Path.Make();
-    zonePath.addRect(Skia.XYWHRect(0, 0, W, H));
-    zonePath.addCircle(zcx, zcy, zr);
-    zonePath.setFillType(FillType.EvenOdd);
-    canvas.drawPath(zonePath, mkAlpha('#050010', 0.42));
-
-    canvas.drawCircle(zcx, zcy, zr + 14 * zoom * 0.3, mkAlpha('#ff0040', 0.04 * pulse));
-    canvas.drawCircle(zcx, zcy, zr + 7  * zoom * 0.3, mkAlpha('#ff2050', 0.08 * pulse));
-    canvas.drawCircle(zcx, zcy, zr + 3  * zoom * 0.3, mkAlpha('#ff3c3c', 0.14 * pulse));
-    canvas.drawCircle(zcx, zcy, zr, mkStrokeA('#ff3c3c', 2.5, 0.7 + pulse * 0.3));
+  // ── Lueur des feux (activeEvent fire) ────────────────────────────────────
+  if (v.activeEvent?.type === 'fire') {
+    const ae  = v.activeEvent;
+    const fwx = ae.x || 50, fwy = ae.y || 50;
+    const fh  = hm ? getElev(fwx, fwy, hm) : 1;
+    const { ix:fix, iy:fiy } = wToIso(fwx, fwy, fh);
+    const fsx = W/2 + (fix - camIx) * zoom;
+    const fsy = H/2 + (fiy - camIy) * zoom;
+    const fPulse = 0.6 + Math.sin(t * 5.5) * 0.4;
+    const fGlow  = 80 * zoom * 0.8;
+    canvas.drawCircle(fsx, fsy, fGlow * 2.5, mkAlpha('#ff4400', 0.04 * fPulse));
+    canvas.drawCircle(fsx, fsy, fGlow * 1.5, mkAlpha('#ff6600', 0.08 * fPulse));
+    canvas.drawCircle(fsx, fsy, fGlow * 0.8, mkAlpha('#ffaa00', 0.14 * fPulse));
+    canvas.drawCircle(fsx, fsy, fGlow * 0.3, mkAlpha('#ffcc44', 0.30 * fPulse));
   }
+
+  // ── Faune (points animés sur la carte) ────────────────────────────────────
+  const FAUNA_COLORS = { deer:'#c0a040', wolf:'#6e4020', rabbit:'#d0c080', boar:'#6a3a20' };
+  (v.fauna || []).forEach(f => {
+    if (f.hp <= 0) return;
+    const fh = hm ? getElev(f.x, f.y, hm) : 1;
+    const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.2);
+    const fsx = W/2 + (fix - camIx) * zoom;
+    const fsy = H/2 + (fiy - camIy) * zoom;
+    if (fsx < -10 || fsx > W+10 || fsy < -10 || fsy > H+10) return;
+    const fc = FAUNA_COLORS[f.type] || '#888844';
+    const fr = Math.max(2, zoom * 1.1);
+    const bob = Math.sin(t * 3 + f.id.length) * 1.5;
+    canvas.drawCircle(fsx, fsy + bob, fr * 1.8, mkAlpha(fc, 0.18));
+    canvas.drawCircle(fsx, fsy + bob, fr, mkFill(fc));
+  });
 
   // ── Particules ────────────────────────────────────────────────────────────
   for (let i = 0; i < (v.particles || []).length; i++) {
@@ -542,9 +609,12 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       }
     }
   }
-  if (zone) {
-    canvas.drawCircle(mmx + zone.cx*sc, mmy + zone.cy*sc, zone.radius*sc, mkStrokeA('#ff3c3c', 1, 0.60));
-  }
+  // Faune sur minimap
+  (v.fauna || []).forEach(f => {
+    if (f.hp <= 0) return;
+    const fc = FAUNA_COLORS[f.type] || '#888';
+    canvas.drawCircle(mmx + f.x*sc, mmy + f.y*sc, 1.2, mkAlpha(fc, 0.65));
+  });
   // Cercle vision sur minimap
   if (followed) {
     canvas.drawCircle(mmx + followed.x*sc, mmy + followed.y*sc,
@@ -593,11 +663,11 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   // ── État visuel ───────────────────────────────────────────────────────
   const gvisRef = useRef({
-    champions: [], zone: { cx:50, cy:50, radius:55 },
+    champions: [],
     alliances: [], dayPhase: 0, tick: 0,
-    supplies: [], biome: 'forêt', followId: null,
+    supplies: [], loots: [], biome: 'forêt', followId: null,
     particles: [], pendingSpawns: [],
-    heightMap: null,
+    heightMap: null, fauna: [], activeEvent: null,
   });
 
   // ── Suivi champion ────────────────────────────────────────────────────
@@ -740,6 +810,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
         prevX: ex ? ex.x : tx, prevY: ex ? ex.y : ty,
         tx, ty,
         hp: c.hp, maxHp: c.maxHp,
+        hunger: c.hunger != null ? c.hunger : null,
+        thirst: c.thirst != null ? c.thirst : null,
         color: c.color || CHAMP_COLORS[i % CHAMP_COLORS.length],
         isDead: c.hp <= 0,
         combatFlash: ex ? ex.combatFlash : 0,
@@ -771,23 +843,20 @@ export default function BattleMap({ battleState, onChampionTap }) {
       }
     });
 
-    const rawZone = battleState.map?.zone;
-    const zone    = rawZone
-      ? { cx: rawZone.cx * sX, cy: rawZone.cy * sY, radius: rawZone.radius * sX }
-      : { cx: 50, cy: 50, radius: 55 };
-
     gvisRef.current = {
       champions:     champs,
-      zone,
       alliances:     battleState.alliances || [],
       dayPhase:      battleState.dayPhase  || 0,
       tick:          battleState.tick      || 0,
       supplies:      (battleState.map?.supplies || []).map(s => ({ ...s, x: s.x * sX, y: s.y * sY })),
+      loots:         (battleState.map?.loots    || []).map(l => ({ ...l, x: l.x * sX, y: l.y * sY })),
       biome,
       heightMap:     hm,
       followId:      gvisRef.current.followId,
       particles:     gvisRef.current.particles || [],
       pendingSpawns: spawns,
+      fauna:         (battleState.map?.fauna || []).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
+      activeEvent:   battleState.activeEvent || null,
     };
   }, [battleState]);
 

@@ -8,11 +8,8 @@ import ChampionModel from '../components/ChampionModel';
 
 // ── Constantes monde ──────────────────────────────────────────────────────
 const WORLD        = 300;
-const ZONE_START   = 185;
-const ZONE_MIN     = 10;
-const ZONE_EVERY   = 4;
-const ZONE_SHRINK  = 8;
-const ZONE_DMG     = 6;
+const ISLAND_EDGE  = 28;          // pixels from edge = water zone
+const WATER_DMG    = 5;           // HP/tick while in water
 const COMBAT_RANGE = 8;
 const DAY_LEN      = 24;
 const NIGHT_START  = 18;
@@ -20,6 +17,40 @@ const DUSK_START   = 15;
 const EVENT_COOLDOWN   = 20;
 const ALLIANCE_EVERY   = 12;
 const MENTAL_DURATIONS = { berserk:6, exhausted:8, traumatized:5 };
+
+// ── Système de survie ─────────────────────────────────────────────────────
+const HUNGER_DRAIN = 2;   // /tick
+const THIRST_DRAIN = 3;   // /tick
+const HUNGER_DMG   = 4;   // HP/tick when hunger=0
+const THIRST_DMG   = 6;   // HP/tick when thirst=0
+const TEMP_DMG     = 3;   // HP/tick when too hot/cold
+
+// ── Armes médiévales ─────────────────────────────────────────────────────
+const WEAPON_DEFS = {
+  fists:  { name:'Poings',   meleeRange:9,  rangedRange:0,  dmgMin:1,  dmgMax:4,  def:0 },
+  sword:  { name:'Épée',     meleeRange:10, rangedRange:0,  dmgMin:5,  dmgMax:11, def:0 },
+  spear:  { name:'Lance',    meleeRange:18, rangedRange:0,  dmgMin:4,  dmgMax:9,  def:0 },
+  bow:    { name:'Arc',      meleeRange:9,  rangedRange:50, dmgMin:5,  dmgMax:13, def:0 },
+  shield: { name:'Bouclier', meleeRange:9,  rangedRange:0,  dmgMin:1,  dmgMax:3,  def:5 },
+};
+const WEAPON_LOOT = ['sword','spear','bow','shield'];
+
+// ── Faune ─────────────────────────────────────────────────────────────────
+const FAUNA_DEFS = {
+  deer:   { maxHp:40,  speed:5, dmg:0,  food:50, water:10, aggressive:false, fearRange:14, label:'Cerf'     },
+  wolf:   { maxHp:60,  speed:6, dmg:9,  food:30, water:5,  aggressive:true,  attackRange:10,label:'Loup'    },
+  rabbit: { maxHp:10,  speed:8, dmg:0,  food:15, water:5,  aggressive:false, fearRange:20, label:'Lapin'    },
+  boar:   { maxHp:75,  speed:4, dmg:13, food:55, water:10, aggressive:true,  attackRange:12,label:'Sanglier' },
+};
+
+// ── Flore ─────────────────────────────────────────────────────────────────
+const FLORA_DEFS = {
+  berries:     { food:28,  water:8,  heal:0,  poisonChance:0,    label:'Baies'          },
+  herbs:       { food:5,   water:0,  heal:22, poisonChance:0,    label:'Herbes'         },
+  mushroom:    { food:18,  water:0,  heal:0,  poisonChance:0.40, label:'Champignon'     },
+  waterSource: { food:0,   water:55, heal:0,  poisonChance:0,    label:'Source d\'eau'  },
+  poisonPlant: { food:0,   water:0,  heal:0,  poisonChance:1.0,  label:'Plante toxique' },
+};
 
 // ── POIs ──────────────────────────────────────────────────────────────────
 const BASE_POIS = [
@@ -176,11 +207,16 @@ function makeChamp(id, name, colorIdx, spawnRange=[20,280]) {
     strength:rng(3,8), speed:rng(3,8), defense:rng(2,6),
     endurance:rng(3,7), instinct:rng(2,7), survival:rng(2,7),
   };
+  const endurance = stats.endurance || 3;
+  const maxHp = 100 + endurance * 10;
   return {
     id, name, colorIdx,
     color: CHAMP_COLORS[colorIdx%CHAMP_COLORS.length],
     x:rng(sMin,sMax), y:rng(sMin,sMax),
-    hp:150, maxHp:150, stats,
+    hp:maxHp, maxHp,
+    hunger:100, thirst:100, temperature:50,
+    weapon:'fists',
+    stats,
     archetype: getArch(stats),
     buffs:[], items:[], statusEffects:[],
     simStats:{ kills:0, dmgDealt:0, dmgTaken:0, crafts:0, survivedTicks:0 },
@@ -195,108 +231,260 @@ function makeChamp(id, name, colorIdx, spawnRange=[20,280]) {
 
 // ── État initial ──────────────────────────────────────────────────────────
 const MAP_SIZES = {
-  S:{ zoneStart:130, spawn:[25,175] },
-  M:{ zoneStart:185, spawn:[20,280] },
-  L:{ zoneStart:240, spawn:[10,290] },
+  S:{ spawn:[50,250] },
+  M:{ spawn:[40,260] },
+  L:{ spawn:[30,270] },
 };
+
+function generateFauna(count) {
+  const types = Object.keys(FAUNA_DEFS);
+  return Array.from({length:count}, (_,i) => {
+    const t = types[rng(0,types.length-1)];
+    const d = FAUNA_DEFS[t];
+    return {
+      id:`fauna_${i}`, type:t, label:d.label,
+      x:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
+      y:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
+      hp:d.maxHp, maxHp:d.maxHp,
+      _fleeTick:0,
+    };
+  });
+}
+
+function generateFlora(biome, count) {
+  const types = Object.keys(FLORA_DEFS);
+  // biome weighting
+  const biomeWeights = {
+    'forêt':    ['berries','herbs','mushroom','waterSource'],
+    'désert':   ['poisonPlant','herbs','waterSource'],
+    'toundra':  ['herbs','mushroom','berries'],
+    'marais':   ['mushroom','poisonPlant','waterSource','herbs'],
+    'montagne': ['berries','herbs','mushroom'],
+  };
+  const pool = biomeWeights[biome] || types;
+  return Array.from({length:count}, (_,i) => {
+    const t = pool[rng(0,pool.length-1)];
+    const d = FLORA_DEFS[t];
+    return {
+      id:`flora_${i}`, type:t, label:d.label,
+      x:rng(ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5),
+      y:rng(ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5),
+      collected:false,
+      respawnTick: -1,
+    };
+  });
+}
+
 function createSimState(cfg={}) {
   const count     = clamp(cfg.champCount||8, 4, 24);
   const names     = (cfg.champNames||CHAMP_NAMES).slice(0,count);
   const sizeCfg   = MAP_SIZES[cfg.mapSize||'M'];
   const biome     = cfg.biome||['forêt','désert','toundra','marais','montagne'][rng(0,4)];
   const champs    = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn));
+  const faunaCount = 6 + count;
+  const floraCount = 12 + count * 2;
   return {
     id:'sim_local', tick:0, status:'active', winner:null,
     events:[], narrative:[],
     dayPhase:0, alliances:[], activeEvent:null,
     lastEventTick:0,
-    matchStats:{ totalCombats:0, totalCrafts:0, zoneDeaths:0, alliancesFormed:0, betrayals:0 },
+    matchStats:{ totalCombats:0, totalCrafts:0, waterDeaths:0, alliancesFormed:0, betrayals:0 },
     map:{
       biome,
       width:WORLD, height:WORLD,
-      zone:{ cx:WORLD/2, cy:WORLD/2, radius:sizeCfg.zoneStart },
       pois:BASE_POIS.map(p=>({...p})),
-      loots:Array.from({length:8+count},(_,i)=>({
-        id:`loot_${i}`,x:rng(10,290),y:rng(10,290),type:['arme','soin','armure'][i%3]
+      loots:Array.from({length:6+count},(_,i)=>({
+        id:`loot_${i}`,
+        x:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
+        y:rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10),
+        type:['sword','spear','bow','shield','soin','soin','armure'][i%7],
+        _dropTick: i * 3,  // staggered loot drop animation
       })),
       supplies:[],traps:[],
+      fauna: generateFauna(faunaCount),
+      flora: generateFlora(biome, floraCount),
     },
     champions:champs,
   };
 }
 
-// ── IA ────────────────────────────────────────────────────────────────────
-function aiMove(c, alive, zone, supplies, pois, isNight, alliances, activeEvent) {
-  const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
-  if (!enemies.length) return {dx:noise(1),dy:noise(1)};
-
-  // Alliés : exclure des ennemis
-  const myAlly = (alliances||[]).find(al=>al.ids.includes(c.id));
-  const allyId = myAlly?.ids.find(id=>id!==c.id);
-  const realEnemies = allyId ? enemies.filter(e=>e.id!==allyId) : enemies;
-
-  const targets  = realEnemies.length ? realEnemies : enemies;
-  const hpR      = c.hp/c.maxHp;
-  const nearest  = targets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p);
-  const weakest  = targets.reduce((p,e)=>e.hp<p.hp?e:p);
-  const nearSup  = supplies.length ? supplies.reduce((p,s)=>dist(s,c)<dist(p,c)?s:p) : null;
-  const dZone    = Math.hypot(c.x-zone.cx, c.y-zone.cy);
-  const nearEdge = dZone > zone.radius*0.84;
-  const prefPOI  = pois.find(p=>p.id===(ARCH[c.archetype]||ARCH.soldier).preferPOI);
-
-  if (alive.length<=3) return toward(weakest,c);
-  if (nearEdge) return toward({x:zone.cx,y:zone.cy},c);
-
-  // Nuit : les instinct≤4 se dirigent vers un abri
-  if (isNight && c.stats.instinct<=4 && hpR>0.5) {
-    const shelter = pois.find(p=>!p._disabled&&(p.effect==='shelter'||p.effect==='cover'));
-    if (shelter && dist(shelter,c)>20) return toward(shelter,c);
-    return {dx:noise(1),dy:noise(1)};
-  }
-  // Tempête/brouillard : réduit la détection
-  const detectRange = (activeEvent?.type==='fog'||activeEvent?.type==='sandstorm') ? 30 : 90;
-
-  switch(c.archetype) {
-    case 'berserker': return toward(nearest,c);
-    case 'hunter': {
-      const mem = c._memory;
-      let tgt = mem.targetId ? targets.find(e=>e.id===mem.targetId) : null;
-      if (!tgt||mem.targetTicks>8) {
-        const vis = targets.filter(e=>dist(e,c)<detectRange);
-        tgt = vis.length ? vis.reduce((p,e)=>e.hp<p.hp?e:p) : nearest;
-        mem.targetId=tgt.id; mem.targetTicks=0;
-      } else mem.targetTicks++;
-      return toward(tgt,c);
-    }
-    case 'opportunist': {
-      const wounded = targets.filter(e=>e.hp/e.maxHp<0.45);
-      if (wounded.length) return toward(wounded.sort((a,b)=>dist(a,c)-dist(b,c))[0],c);
-      if (prefPOI&&!prefPOI._disabled&&dist(prefPOI,c)>25) return toward(prefPOI,c);
-      return {dx:sign(zone.cx-c.x)+noise(1), dy:sign(zone.cy-c.y)+noise(1)};
-    }
-    case 'survivor':
-      if (dist(nearest,c)<28) return away(nearest,c);
-      if (nearSup&&dist(nearSup,c)<40) return toward(nearSup,c);
-      if (prefPOI&&!prefPOI._disabled&&dist(prefPOI,c)>20) return toward(prefPOI,c);
-      return {dx:noise(1),dy:noise(1)};
-    case 'tank': {
-      const close = targets.filter(e=>dist(e,c)<22);
-      if (close.length) return toward(close[0],c);
-      return {dx:sign(zone.cx-c.x),dy:sign(zone.cy-c.y)};
-    }
-    default: { // soldier
-      if (c._memory.lastAttackerId) {
-        const nem = targets.find(e=>e.id===c._memory.lastAttackerId);
-        if (nem) return toward(nem,c);
-      }
-      if (hpR<0.28) { if(nearSup&&dist(nearSup,c)<50) return toward(nearSup,c); return away(nearest,c); }
-      if (hpR>0.55) return toward(nearest,c);
-      return {dx:noise(1),dy:noise(1)};
-    }
-  }
-}
+// ── IA — nuage de probabilités ────────────────────────────────────────────
 const toward = (t,c) => ({dx:sign(t.x-c.x)||noise(1), dy:sign(t.y-c.y)||noise(1)});
 const away   = (t,c) => ({dx:sign(c.x-t.x)||noise(1), dy:sign(c.y-t.y)||noise(1)});
+
+function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent, fauna, flora) {
+  const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
+
+  // Alliés : exclure des ennemis cibles
+  const myAlly    = (alliances||[]).find(al=>al.ids.includes(c.id));
+  const allyId    = myAlly?.ids.find(id=>id!==c.id);
+  const targets   = (allyId ? enemies.filter(e=>e.id!==allyId) : enemies);
+  const nearest   = targets.length ? targets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
+  const weakest   = targets.length ? targets.reduce((p,e)=>e.hp<p.hp?e:p)         : null;
+
+  const hpR       = c.hp / c.maxHp;
+  const hungerR   = (c.hunger??100) / 100;
+  const thirstR   = (c.thirst??100) / 100;
+  const nearSup   = supplies.length ? supplies.reduce((p,s)=>dist(s,c)<dist(p,c)?s:p) : null;
+  const nearFauna = (fauna||[]).filter(f=>f.hp>0&&dist(f,c)<60);
+  const nearFlora = (flora||[]).filter(f=>!f.collected&&dist(f,c)<40);
+  const nearWater = nearFlora.find(f=>f.type==='waterSource');
+  const nearFood  = nearFlora.find(f=>FLORA_DEFS[f.type]?.food>0);
+  const prefPOI   = pois.find(p=>p.id===(ARCH[c.archetype]||ARCH.soldier).preferPOI);
+
+  const detectRange = (activeEvent?.type==='fog'||activeEvent?.type==='sandstorm') ? 30 : 90;
+  const visTargets  = targets.filter(e=>dist(e,c)<detectRange);
+
+  // Urgence : score de 0 à N pour chaque action
+  const scores = {
+    attack_melee:   0,
+    attack_ranged:  0,
+    flee_enemy:     0,
+    seek_food:      0,
+    seek_water:     0,
+    hunt_animal:    0,
+    collect_supply: 0,
+    explore:        0,
+    seek_shelter:   0,
+  };
+
+  // Danger
+  const closestEnemy = visTargets.length ? visTargets.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p) : null;
+  const enemyDist    = closestEnemy ? dist(closestEnemy,c) : 999;
+  const weapon       = WEAPON_DEFS[c.weapon||'fists'];
+
+  if (closestEnemy) {
+    const canMelee  = enemyDist <= weapon.meleeRange * 2.5;
+    const canRanged = weapon.rangedRange > 0 && enemyDist <= weapon.rangedRange * 2.5;
+    const isWeak    = closestEnemy.hp / closestEnemy.maxHp < 0.4;
+    const iStrong   = hpR > 0.55;
+
+    if (iStrong || isWeak) {
+      if (canMelee)  scores.attack_melee  += 5 + (isWeak?3:0);
+      if (canRanged) scores.attack_ranged += 4 + (isWeak?2:0);
+    }
+    if (hpR < 0.35 && !isWeak) scores.flee_enemy += 6 + (enemyDist<15?4:0);
+    if (hpR < 0.55 && enemyDist < 20) scores.flee_enemy += 2;
+  }
+
+  // Faim / soif → survie devient prioritaire
+  if (hungerR < 0.35) scores.seek_food  += Math.round((1-hungerR)*8);
+  if (thirstR < 0.35) scores.seek_water += Math.round((1-thirstR)*10);
+  if (hungerR < 0.6)  scores.seek_food  += 2;
+  if (thirstR < 0.6)  scores.seek_water += 2;
+
+  // Chasse d'animaux (nourriture + ressource)
+  if (nearFauna.length && hungerR < 0.7) {
+    const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive);
+    if (prey) scores.hunt_animal += 3 + (hungerR<0.4?3:0);
+  }
+
+  // Colis / arme
+  if (nearSup) scores.collect_supply += nearSup.type.match(/sword|spear|bow|shield/) ? 5 : 3;
+
+  // Nuit → abri pour instinct faibles
+  if (isNight && c.stats.instinct <= 4 && hpR > 0.5) scores.seek_shelter += 4;
+
+  // Exploration : basse urgence si rien de pressant
+  scores.explore += 1;
+
+  // Modificateurs selon archétype
+  switch(c.archetype) {
+    case 'berserker':
+      scores.attack_melee  = Math.round(scores.attack_melee * 1.7);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.3);
+      scores.explore       += 1;
+      break;
+    case 'hunter':
+      scores.attack_ranged = Math.round(scores.attack_ranged * 1.5);
+      scores.hunt_animal   = Math.round(scores.hunt_animal * 1.6);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 1.1);
+      break;
+    case 'survivor':
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 1.5);
+      scores.seek_food     = Math.round(scores.seek_food * 1.4);
+      scores.seek_water    = Math.round(scores.seek_water * 1.4);
+      scores.attack_melee  = Math.round(scores.attack_melee * 0.5);
+      break;
+    case 'opportunist':
+      scores.collect_supply= Math.round(scores.collect_supply * 1.5);
+      scores.attack_melee  = closestEnemy && closestEnemy.hp/closestEnemy.maxHp<0.3 ? scores.attack_melee*2 : Math.round(scores.attack_melee*0.7);
+      break;
+    case 'tank':
+      scores.attack_melee  = Math.round(scores.attack_melee * 1.3);
+      scores.flee_enemy    = Math.round(scores.flee_enemy * 0.4);
+      break;
+    case 'soldier':
+      scores.explore += 1;
+      if (c._memory?.lastAttackerId && targets.find(e=>e.id===c._memory.lastAttackerId))
+        scores.attack_melee += 3;
+      break;
+  }
+
+  // Modificateurs selon consigne (instructions keyword)
+  const instr = (c.instructions||'').toLowerCase();
+  if (instr.match(/agress|attaque|guerr|combat/)) {
+    scores.attack_melee  += 3; scores.attack_ranged += 2; scores.flee_enemy = Math.max(0,scores.flee_enemy-2);
+  }
+  if (instr.match(/fuit|évit|cache|discr/)) {
+    scores.flee_enemy += 3; scores.attack_melee = Math.max(0,scores.attack_melee-2);
+  }
+  if (instr.match(/survie|nourriture|ressource/)) {
+    scores.seek_food += 3; scores.seek_water += 2; scores.hunt_animal += 2;
+  }
+  if (instr.match(/explor|bouger|card/)) {
+    scores.explore += 4;
+  }
+
+  // Tirage pondéré
+  const entries = Object.entries(scores).filter(([,v])=>v>0);
+  if (!entries.length) return {dx:noise(1),dy:noise(1)};
+  const total   = entries.reduce((s,[,v])=>s+v, 0);
+  let pick = Math.random() * total;
+  let chosen = entries[entries.length-1][0];
+  for (const [action, score] of entries) {
+    pick -= score;
+    if (pick <= 0) { chosen = action; break; }
+  }
+
+  // Exécution de l'action choisie
+  switch(chosen) {
+    case 'attack_melee':
+    case 'attack_ranged': {
+      const t = chosen==='attack_ranged' && weakest ? weakest : (nearest || weakest);
+      return t ? toward(t,c) : {dx:noise(1),dy:noise(1)};
+    }
+    case 'flee_enemy':
+      return closestEnemy ? away(closestEnemy,c) : {dx:noise(1),dy:noise(1)};
+    case 'seek_food': {
+      if (nearFood) return toward(nearFood,c);
+      const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive);
+      if (prey) return toward(prey,c);
+      if (nearSup && nearSup.type==='soin') return toward(nearSup,c);
+      return {dx:noise(1),dy:noise(1)};
+    }
+    case 'seek_water': {
+      if (nearWater) return toward(nearWater,c);
+      const waterPOI = pois.find(p=>!p._disabled&&p.effect==='water');
+      if (waterPOI) return toward(waterPOI,c);
+      return {dx:noise(1),dy:noise(1)};
+    }
+    case 'hunt_animal': {
+      const prey = nearFauna.find(f=>!FAUNA_DEFS[f.type]?.aggressive&&dist(f,c)<60);
+      return prey ? toward(prey,c) : {dx:noise(1),dy:noise(1)};
+    }
+    case 'collect_supply':
+      return nearSup ? toward(nearSup,c) : {dx:noise(1),dy:noise(1)};
+    case 'seek_shelter': {
+      const shelter = pois.find(p=>!p._disabled&&(p.effect==='shelter'||p.effect==='cover'));
+      return shelter ? toward(shelter,c) : {dx:noise(1),dy:noise(1)};
+    }
+    case 'explore':
+    default:
+      if (prefPOI&&!prefPOI._disabled&&dist(prefPOI,c)>30) return toward(prefPOI,c);
+      return {dx:noise(1)*2, dy:noise(1)*2};
+  }
+}
 
 // ── Narratif ──────────────────────────────────────────────────────────────
 function getDirection(from,to) {
@@ -657,15 +845,38 @@ function tickSim(prev) {
     return state;
   }
 
-  // Zone
-  const zone = state.map.zone;
-  if (state.tick%ZONE_EVERY===0 && zone.radius>ZONE_MIN) {
-    zone.radius = Math.max(ZONE_MIN, zone.radius-ZONE_SHRINK);
-    events.push({type:'zone',radius:zone.radius});
-  }
-
   // Survie tick
   alive.forEach(c=>c.simStats.survivedTicks++);
+
+  // ── Survie : faim / soif / température ───────────────────────────────
+  const biomeTemp = {forêt:50, désert:82, toundra:12, marais:55, montagne:18};
+  alive.forEach(c=>{
+    if (c.hp<=0) return;
+    c.hunger = Math.max(0, (c.hunger??100) - HUNGER_DRAIN);
+    c.thirst = Math.max(0, (c.thirst??100) - THIRST_DRAIN);
+    // Température cible selon biome + nuit
+    const tTarget = (biomeTemp[state.map.biome]||50) + (isNight ? -12 : 0);
+    c.temperature = c.temperature==null ? 50
+      : c.temperature + (tTarget - c.temperature) * 0.15 + noise(3);
+    c.temperature = clamp(c.temperature, 0, 100);
+    // Dégâts si faim/soif/temp extrêmes
+    if (c.hunger <= 0) {
+      const d = HUNGER_DMG; c.hp -= d; c.simStats.dmgTaken += d;
+      events.push({type:'narr',sub:'hunger',id:c.id,name:c.name,tick:state.tick,
+        text:`souffre de faim — épuisement total (−${d} PV)`});
+    }
+    if (c.thirst <= 0) {
+      const d = THIRST_DMG; c.hp -= d; c.simStats.dmgTaken += d;
+      events.push({type:'narr',sub:'thirst',id:c.id,name:c.name,tick:state.tick,
+        text:`se déshydrate dangereusement (−${d} PV)`});
+    }
+    if (c.temperature < 15 || c.temperature > 80) {
+      const d = TEMP_DMG; c.hp -= d; c.simStats.dmgTaken += d;
+      const msg = c.temperature < 15 ? `gèle sur place (−${d} PV)` : `souffre de la chaleur extrême (−${d} PV)`;
+      events.push({type:'narr',sub:'temperature',id:c.id,name:c.name,tick:state.tick,text:msg});
+    }
+    if (c.hp <= 0) events.push({type:'death',champion:c.id,name:c.name,killedBy:'survival',killedByName:'survie'});
+  });
 
   // Stats effectives
   alive.forEach(c=>{
@@ -728,40 +939,172 @@ function tickSim(prev) {
     const stormSlow = (state.activeEvent?.type==='sandstorm'||state.activeEvent?.type==='fog') ? 0.55 : 1;
     const nightSlow = isNight&&c.stats.instinct<=4 ? 0.6 : 1;
     const spd = Math.max(1,c._eff.speed) * stormSlow * nightSlow;
-    const {dx,dy} = aiMove(c, alive, zone, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent);
-    c.x = clamp(c.x+dx*spd+noise(1), 0, WORLD-1);
-    c.y = clamp(c.y+dy*spd+noise(1), 0, WORLD-1);
+    const {dx,dy} = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora);
+    c.x = clamp(c.x+dx*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+    c.y = clamp(c.y+dy*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
   });
 
-  // Dégâts zone
+  // ── Dégâts eau (bords de l'île) ──────────────────────────────────────
   alive.forEach(c=>{
     if (c.hp<=0) return;
-    if (Math.hypot(c.x-zone.cx,c.y-zone.cy)>zone.radius) {
-      const dmg=Math.ceil(ZONE_DMG+(ZONE_START-zone.radius)*0.45);
-      c.hp-=dmg; c.simStats.dmgTaken+=dmg;
-      events.push({type:'zone_damage',champion:c.id,name:c.name,damage:dmg});
+    const inWater = c.x<ISLAND_EDGE||c.x>WORLD-ISLAND_EDGE||c.y<ISLAND_EDGE||c.y>WORLD-ISLAND_EDGE;
+    if (inWater) {
+      const dmg = WATER_DMG;
+      c.hp -= dmg; c.simStats.dmgTaken += dmg;
+      // Push vers le centre
+      c.x = clamp(c.x + sign(WORLD/2 - c.x)*3, 0, WORLD-1);
+      c.y = clamp(c.y + sign(WORLD/2 - c.y)*3, 0, WORLD-1);
+      events.push({type:'narr',sub:'water',id:c.id,name:c.name,tick:state.tick,
+        text:`se noie dans les eaux glacées qui entourent l'île (−${dmg} PV)`});
       if (c.hp<=0) {
-        state.matchStats.zoneDeaths++;
-        events.push({type:'death',champion:c.id,name:c.name,killedBy:'zone',killedByName:'la Zone'});
+        state.matchStats.waterDeaths = (state.matchStats.waterDeaths||0)+1;
+        events.push({type:'death',champion:c.id,name:c.name,killedBy:'water',killedByName:'la mer'});
       }
     }
   });
 
-  // Collecte colis
-  state.map.supplies = state.map.supplies.filter(s=>{
+  // ── Faune : comportement ──────────────────────────────────────────────
+  const aliveFauna = (state.map.fauna||[]).filter(f=>f.hp>0);
+  const aliveChamps = alive.filter(c=>c.hp>0);
+  aliveFauna.forEach(f=>{
+    const def = FAUNA_DEFS[f.type];
+    if (!def) return;
+    const nearChamp = aliveChamps.length ? aliveChamps.reduce((p,c)=>dist(c,f)<dist(p,f)?c:p) : null;
+    const d = nearChamp ? dist(nearChamp,f) : 999;
+
+    if (def.aggressive) {
+      // Loups/sangliers : attaquent si à portée
+      if (nearChamp && d < def.attackRange) {
+        const dmg = rng(Math.floor(def.dmg*0.6), def.dmg);
+        nearChamp.hp -= dmg; nearChamp.simStats.dmgTaken += dmg;
+        events.push({type:'narr',sub:'fauna_attack',id:nearChamp.id,name:nearChamp.name,tick:state.tick,
+          text:`est attaqué(e) par un ${def.label} (−${dmg} PV) !`});
+        if (nearChamp.hp <= 0) events.push({type:'death',champion:nearChamp.id,name:nearChamp.name,killedBy:'fauna',killedByName:def.label});
+        // Mouvement vers la proie
+        if (d > 3) { f.x+=sign(nearChamp.x-f.x)*def.speed*0.5; f.y+=sign(nearChamp.y-f.y)*def.speed*0.5; }
+      } else if (nearChamp && d < 60) {
+        f.x += sign(nearChamp.x-f.x)*def.speed*0.3+noise(1);
+        f.y += sign(nearChamp.y-f.y)*def.speed*0.3+noise(1);
+      } else {
+        f.x += noise(2); f.y += noise(2);
+      }
+    } else {
+      // Cerfs/lapins : fuient si proche
+      if (nearChamp && d < def.fearRange) {
+        f.x += sign(f.x - nearChamp.x)*def.speed*0.5+noise(1);
+        f.y += sign(f.y - nearChamp.y)*def.speed*0.5+noise(1);
+      } else {
+        f.x += noise(2); f.y += noise(2);
+      }
+    }
+    f.x = clamp(f.x, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
+    f.y = clamp(f.y, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
+  });
+
+  // Chasse : champion à portée d'une proie non-aggressive → kill + nourriture
+  aliveChamps.forEach(c=>{
+    if (c.hp<=0) return;
+    const eff = c._eff || c.stats;
+    const weapon = WEAPON_DEFS[c.weapon||'fists'];
+    for (const f of aliveFauna) {
+      if (f.hp<=0) continue;
+      const def = FAUNA_DEFS[f.type];
+      if (!def || def.aggressive) continue;
+      if (dist(f,c) > weapon.meleeRange * 2) continue;
+      // Chance de chasse basée sur instinct
+      if (Math.random() > 0.3 + (eff.instinct||3)*0.04) continue;
+      f.hp = 0; // tuer l'animal
+      c.hunger  = Math.min(100, (c.hunger??100) + def.food);
+      c.thirst  = Math.min(100, (c.thirst??100) + def.water);
+      events.push({type:'narr',sub:'hunt',id:c.id,name:c.name,tick:state.tick,
+        text:`chasse et abat un ${def.label} (+${def.food} 🍗 +${def.water} 💧)`});
+      break;
+    }
+  });
+
+  // Respawn faune toutes les 30 ticks
+  if (state.tick % 30 === 0) {
+    const types = Object.keys(FAUNA_DEFS);
+    const t = types[rng(0,types.length-1)];
+    const d = FAUNA_DEFS[t];
+    state.map.fauna.push({
+      id:`fauna_r_${state.tick}`, type:t, label:d.label,
+      x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),
+      y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),
+      hp:d.maxHp, maxHp:d.maxHp, _fleeTick:0,
+    });
+  }
+
+  // ── Flore : collecte ─────────────────────────────────────────────────
+  (state.map.flora||[]).forEach(f=>{
+    if (f.collected) {
+      // Repousse après 20 ticks
+      if (f.respawnTick > 0 && state.tick >= f.respawnTick) { f.collected=false; f.respawnTick=-1; }
+      return;
+    }
+    for (const c of aliveChamps) {
+      if (c.hp<=0||dist(c,f)>8) continue;
+      const def = FLORA_DEFS[f.type];
+      if (!def) continue;
+      // Poison
+      const instinct = (c._eff||c.stats).instinct || 3;
+      const poisonR  = Math.max(0, def.poisonChance - instinct*0.05);
+      if (Math.random() < poisonR) {
+        c.statusEffects.push({type:'poison',ticks:10,srcId:'flora'});
+        events.push({type:'narr',sub:'poison',id:c.id,name:c.name,tick:state.tick,
+          text:`mange une ${def.label} toxique ! Empoisonné.`});
+      } else {
+        if (def.food > 0)  c.hunger = Math.min(100,(c.hunger??100)+def.food);
+        if (def.water > 0) c.thirst = Math.min(100,(c.thirst??100)+def.water);
+        if (def.heal > 0)  c.hp     = Math.min(c.maxHp, c.hp+def.heal);
+        if (def.food+def.water+def.heal > 0) {
+          const parts = [];
+          if (def.food>0)  parts.push(`+${def.food} 🍗`);
+          if (def.water>0) parts.push(`+${def.water} 💧`);
+          if (def.heal>0)  parts.push(`+${def.heal} ❤️`);
+          events.push({type:'narr',sub:'forage',id:c.id,name:c.name,tick:state.tick,
+            text:`cueille des ${def.label} (${parts.join(' ')})`});
+        }
+      }
+      f.collected = true;
+      f.respawnTick = state.tick + 20;
+      break;
+    }
+  });
+
+  // Collecte colis / loots
+  const allDrops = [...(state.map.supplies||[]), ...(state.map.loots||[]).filter(l=>l._dropTick!=null && state.tick >= l._dropTick)];
+  const collectedIds = new Set();
+  allDrops.forEach(s=>{
+    if (collectedIds.has(s.id)) return;
     for (const c of alive) {
-      if (c.hp<=0) continue;
-      if (dist(s,c)<9) {
-        if (s.type==='soin')    c.hp=Math.min(c.maxHp,c.hp+45);
+      if (c.hp<=0||collectedIds.has(s.id)) continue;
+      if (dist(s,c)<10) {
+        if (s.type==='soin')    { c.hp=Math.min(c.maxHp,c.hp+45); c.hunger=Math.min(100,(c.hunger??100)+15); }
         if (s.type==='force')   c.buffs.push({stat:'strength',value:3,ticks:7});
         if (s.type==='vitesse') c.buffs.push({stat:'speed',value:3,ticks:7});
         if (s.type==='armure')  c.buffs.push({stat:'defense',value:3,ticks:7});
-        events.push({type:'collect',champion:c.id,name:c.name,supply:s.type});
-        return false;
+        if (s.type==='festin')  { c.hunger=Math.min(100,(c.hunger??100)+60); c.thirst=Math.min(100,(c.thirst??100)+40); }
+        // Armes : remplacer si meilleure
+        if (WEAPON_DEFS[s.type]) {
+          const curW  = WEAPON_DEFS[c.weapon||'fists'];
+          const newW  = WEAPON_DEFS[s.type];
+          const better = (newW.dmgMax + newW.def + newW.rangedRange*0.2) > (curW.dmgMax + curW.def + curW.rangedRange*0.2);
+          if (better) {
+            c.weapon = s.type;
+            events.push({type:'narr',sub:'loot_weapon',id:c.id,name:c.name,tick:state.tick,
+              text:`ramasse ${newW.name} ! ⚔️`});
+          }
+        } else {
+          events.push({type:'collect',champion:c.id,name:c.name,supply:s.type});
+        }
+        collectedIds.add(s.id);
+        break;
       }
     }
-    return true;
   });
+  state.map.supplies = (state.map.supplies||[]).filter(s=>!collectedIds.has(s.id));
+  state.map.loots    = (state.map.loots||[]).filter(l=>!collectedIds.has(l.id));
 
   // Pièges
   state.map.traps = checkTraps(alive, state.map.traps, events, state.tick);
@@ -772,7 +1115,13 @@ function tickSim(prev) {
     for (let j=i+1;j<fighters.length;j++) {
       const a=fighters[i], b=fighters[j];
       if (a.hp<=0||b.hp<=0) continue;
-      if (dist(a,b)>=COMBAT_RANGE) continue;
+      const d = dist(a,b);
+      // Portée : chaque combattant peut frapper avec son arme si à portée
+      const wA = WEAPON_DEFS[a.weapon||'fists'];
+      const wB = WEAPON_DEFS[b.weapon||'fists'];
+      const aCanHit = d <= wA.meleeRange || (wA.rangedRange > 0 && d <= wA.rangedRange);
+      const bCanHit = d <= wB.meleeRange || (wB.rangedRange > 0 && d <= wB.rangedRange);
+      if (!aCanHit && !bCanHit) continue;
       // Alliance → pas de combat
       const allied=(state.alliances||[]).some(al=>al.ids.includes(a.id)&&al.ids.includes(b.id));
       if (allied) continue;
@@ -798,36 +1147,42 @@ function tickSim(prev) {
       const bA=a._mentalState==='berserk'?4:a.archetype==='berserker'?2:0;
       const bB=b._mentalState==='berserk'?4:b.archetype==='berserker'?2:0;
       const dA=Math.random()<sA.instinct*0.04, dB=Math.random()<sB.instinct*0.04;
-      const rA=dA?0:Math.max(1,sA.strength+bA-Math.floor(sB.defense*.5)+rng(0,4));
-      const rB=dB?0:Math.max(1,sB.strength+bB-Math.floor(sA.defense*.5)+rng(0,4));
-      const tA=Math.max(1,rB-Math.floor(sA.endurance*.3));
-      const tB=Math.max(1,rA-Math.floor(sB.endurance*.3));
-      a.hp-=tA; b.hp-=tB;
-      a.simStats.dmgTaken+=tA; b.simStats.dmgTaken+=tB;
-      a.simStats.dmgDealt+=tB; b.simStats.dmgDealt+=tA;
+      // Dégâts arme
+      const wDmgA = aCanHit ? rng(wA.dmgMin, wA.dmgMax) : 0;
+      const wDmgB = bCanHit ? rng(wB.dmgMin, wB.dmgMax) : 0;
+      const rA=dA?0:Math.max(1, sA.strength+bA + wDmgA - Math.floor((sB.defense+wB.def)*.5));
+      const rB=dB?0:Math.max(1, sB.strength+bB + wDmgB - Math.floor((sA.defense+wA.def)*.5));
+      // Si seul A peut frapper
+      const dmgToB = bCanHit||aCanHit ? Math.max(1, rA - Math.floor(sB.endurance*.3)) : 0;
+      const dmgToA = (aCanHit&&bCanHit)||(bCanHit&&!aCanHit) ? Math.max(1, rB - Math.floor(sA.endurance*.3)) : 0;
+      const finalDmgA = dA ? 0 : dmgToA;
+      const finalDmgB = dB ? 0 : dmgToB;
+      a.hp-=finalDmgA; b.hp-=finalDmgB;
+      a.simStats.dmgTaken+=finalDmgA; b.simStats.dmgTaken+=finalDmgB;
+      a.simStats.dmgDealt+=finalDmgB; b.simStats.dmgDealt+=finalDmgA;
       a._combatTicks=(a._combatTicks||0)+1; b._combatTicks=(b._combatTicks||0)+1;
-      if (tA>0&&a._memory) a._memory.lastAttackerId=b.id;
-      if (tB>0&&b._memory) b._memory.lastAttackerId=a.id;
+      if (finalDmgA>0&&a._memory) a._memory.lastAttackerId=b.id;
+      if (finalDmgB>0&&b._memory) b._memory.lastAttackerId=a.id;
       state.matchStats.totalCombats++;
       // Poison (hunter/survivor) et saignement (berserker) au toucher
-      if (!dA&&tB>0&&a.archetype==='hunter'&&Math.random()<0.25&&!b.statusEffects?.some(se=>se.type==='poison'))
+      if (!dA&&finalDmgB>0&&a.archetype==='hunter'&&Math.random()<0.25&&!b.statusEffects?.some(se=>se.type==='poison'))
         b.statusEffects.push({type:'poison',ticks:8,srcId:a.id});
-      if (!dB&&tA>0&&b.archetype==='hunter'&&Math.random()<0.25&&!a.statusEffects?.some(se=>se.type==='poison'))
+      if (!dB&&finalDmgA>0&&b.archetype==='hunter'&&Math.random()<0.25&&!a.statusEffects?.some(se=>se.type==='poison'))
         a.statusEffects.push({type:'poison',ticks:8,srcId:b.id});
-      if (!dA&&tB>0&&a.archetype==='berserker'&&Math.random()<0.30&&!b.statusEffects?.some(se=>se.type==='bleed'))
+      if (!dA&&finalDmgB>0&&a.archetype==='berserker'&&Math.random()<0.30&&!b.statusEffects?.some(se=>se.type==='bleed'))
         b.statusEffects.push({type:'bleed',ticks:12,srcId:a.id});
-      if (!dB&&tA>0&&b.archetype==='berserker'&&Math.random()<0.30&&!a.statusEffects?.some(se=>se.type==='bleed'))
+      if (!dB&&finalDmgA>0&&b.archetype==='berserker'&&Math.random()<0.30&&!a.statusEffects?.some(se=>se.type==='bleed'))
         a.statusEffects.push({type:'bleed',ticks:12,srcId:b.id});
       // Étourdissement (tank sur gros coup)
-      if (!dA&&tB>=Math.floor(b.maxHp*0.22)&&a.archetype==='tank'&&Math.random()<0.20&&!b.statusEffects?.some(se=>se.type==='stun'))
+      if (!dA&&finalDmgB>=Math.floor(b.maxHp*0.22)&&a.archetype==='tank'&&Math.random()<0.20&&!b.statusEffects?.some(se=>se.type==='stun'))
         b.statusEffects.push({type:'stun',ticks:3,srcId:a.id});
-      events.push({type:'combat',a:a.id,aName:a.name,b:b.id,bName:b.name,dmgA:tB,dmgB:tA,dodgeA:dA,dodgeB:dB,tick:state.tick});
+      events.push({type:'combat',a:a.id,aName:a.name,b:b.id,bName:b.name,dmgA:finalDmgB,dmgB:finalDmgA,dodgeA:dA,dodgeB:dB,tick:state.tick,wA:wA.name,wB:wB.name});
       // Gros coup → berserk
-      if (tA>=Math.floor(a.maxHp*0.3)&&a._mentalState==='normal'&&Math.random()<0.35) {
+      if (finalDmgA>=Math.floor(a.maxHp*0.3)&&a._mentalState==='normal'&&Math.random()<0.35) {
         a._mentalState='berserk'; a._mentalStateTick=state.tick;
         events.push({type:'narr',sub:'berserk',id:a.id,name:a.name,tick:state.tick,text:`entre en rage après un coup dévastateur !`});
       }
-      if (tB>=Math.floor(b.maxHp*0.3)&&b._mentalState==='normal'&&Math.random()<0.35) {
+      if (finalDmgB>=Math.floor(b.maxHp*0.3)&&b._mentalState==='normal'&&Math.random()<0.35) {
         b._mentalState='berserk'; b._mentalStateTick=state.tick;
         events.push({type:'narr',sub:'berserk',id:b.id,name:b.name,tick:state.tick,text:`entre en rage après un coup dévastateur !`});
       }
@@ -881,10 +1236,12 @@ function tickSim(prev) {
 // ── UI ────────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════
 const SUPPLY_LIST = [
-  {type:'soin',    label:'🧪 Soin',  color:'#2ecc71'},
-  {type:'force',   label:'💪 Force', color:'#e74c3c'},
-  {type:'vitesse', label:'⚡ Vit.',  color:'#3498db'},
-  {type:'armure',  label:'🛡 Arm.',  color:'#f39c12'},
+  {type:'soin',    label:'🧪 Soin',   color:'#2ecc71'},
+  {type:'force',   label:'💪 Force',  color:'#e74c3c'},
+  {type:'vitesse', label:'⚡ Vit.',   color:'#3498db'},
+  {type:'armure',  label:'🛡 Arm.',   color:'#f39c12'},
+  {type:'sword',   label:'⚔️ Épée',   color:'#bdc3c7'},
+  {type:'bow',     label:'🏹 Arc',    color:'#8e44ad'},
 ];
 const NARR_COLORS = {
   campfire:'#3d1f00', scout:'#0a1f3d', treat:'#0d2b1a', craft_start:'#2a1a0a',
@@ -893,6 +1250,9 @@ const NARR_COLORS = {
   traumatized:'#0d0d2a', exhausted:'#1a1a1a', cold:'#001a2a',
   fire_damage:'#2a0d00', trap_trigger:'#1a1a00', cold_snap:'#001520',
   ability:'#0d1a2a', poison:'#0d1a0d', bleed:'#2a0808', stun_end:'#1a1a1a',
+  hunger:'#2a1500', thirst:'#001a2e', temperature:'#1a000d',
+  water:'#00111a', fauna_attack:'#1a1200', hunt:'#0a1a0a',
+  loot_weapon:'#1a1505', survival:'#1a0a00',
 };
 
 export default function SimulateurScreen() {
@@ -942,14 +1302,13 @@ export default function SimulateurScreen() {
     };
     runChunk();
   },[]);
-  const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(10,290),y:rng(10,290)}); return s; }),[]);
+  const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)}); return s; }),[]);
   const cycSpd = useCallback(()=>setSpeed(s=>s===1000?600:s===600?300:s===300?100:1000),[]);
 
   const alive  = sim.champions.filter(c=>c.hp>0);
   const events = sim.events.slice(-20).reverse();
   const winner = sim.status==='finished' ? sim.champions.find(c=>c.id===sim.winner) : null;
   const sel    = selId ? sim.champions.find(c=>c.id===selId) : null;
-  const zR     = sim.map.zone?.radius ?? ZONE_START;
   const active = sim.status==='active';
   const phase  = sim.dayPhase ?? 0;
   const timeIcon = phase>=NIGHT_START?'🌙':phase>=DUSK_START?'🌆':'☀️';
@@ -979,7 +1338,7 @@ export default function SimulateurScreen() {
       <View style={s.statsBar}>
         <Chip val={alive.length}  lbl="Vivants" />
         <Chip val={sim.tick}      lbl="Tick" />
-        <Chip val={`${zR}u`}      lbl="Zone"   color="#e74c3c" />
+        <Chip val={(sim.map.fauna||[]).filter(f=>f.hp>0).length} lbl="Faune" color="#27ae60" />
         <Chip val={`${timeIcon} J${Math.floor(sim.tick/DAY_LEN)+1}`} lbl="Jour" />
         <Chip val={sim.map.biome} lbl="Biome"  small />
         {sim.alliances.length>0&&<Chip val={`🤝${sim.alliances.length}`} lbl="Alliances" color="#e2b96f"/>}
@@ -1020,8 +1379,14 @@ export default function SimulateurScreen() {
                         <View style={[s.hpF,{width:`${Math.round(c.hp/c.maxHp*100)}%`,
                           backgroundColor:c.hp/c.maxHp>.6?'#2ecc71':c.hp/c.maxHp>.3?'#f39c12':'#e74c3c'}]}/>
                       </View>
+                      <View style={s.hpT}>
+                        <View style={[s.hpF,{width:`${Math.round((c.hunger??100))}%`,backgroundColor:'#e67e22'}]}/>
+                      </View>
+                      <View style={s.hpT}>
+                        <View style={[s.hpF,{width:`${Math.round((c.thirst??100))}%`,backgroundColor:'#3498db'}]}/>
+                      </View>
                       <Text style={s.cKills}>
-                        {c.simStats?.kills??0}💀{msIco}{seIco}{inAl?' 🤝':''}{act&&act!=='idle'?` ${actIcon(act)}`:''}</Text>
+                        {c.simStats?.kills??0}💀 {WEAPON_DEFS[c.weapon||'fists']?.name?.slice(0,4)||'✊'}{msIco}{seIco}{inAl?' 🤝':''}{act&&act!=='idle'?` ${actIcon(act)}`:''}</Text>
                     </>
                   ):<Text style={s.cDead}>☠</Text>}
                 </TouchableOpacity>
@@ -1219,7 +1584,7 @@ export default function SimulateurScreen() {
               <View style={s.eStats}>
                 <MS l="Combats"    v={sim.matchStats.totalCombats}/>
                 <MS l="Crafts"     v={sim.matchStats.totalCrafts}/>
-                <MS l="Morts zone" v={sim.matchStats.zoneDeaths}/>
+                <MS l="Morts eau"  v={sim.matchStats.waterDeaths||0}/>
                 <MS l="Alliances"  v={sim.matchStats.alliancesFormed}/>
                 <MS l="Trahisons"  v={sim.matchStats.betrayals}/>
               </View>
@@ -1246,12 +1611,14 @@ function actIcon(t) { return {campfire:'🔥',crafting:'⚒️',foraging:'🍃',
 function EvLine({e}) {
   let icon='',txt='',big=false;
   switch(e.type){
-    case 'death':        icon='💀';big=true; txt=e.killedBy==='zone'?`${e.name} périt hors zone`:`${e.name} tué par ${e.killedByName}`; break;
-    case 'combat':       icon='⚔️'; txt=`${e.aName}(−${e.dmgB}) vs ${e.bName}(−${e.dmgA})`+(e.dodgeA?' 🌀':'')+(e.dodgeB?' 🌀':''); break;
+    case 'death':        icon='💀';big=true;
+      txt=e.killedBy==='water'?`${e.name} se noie dans la mer`
+        :e.killedBy==='survival'?`${e.name} succombe à l'épuisement`
+        :e.killedBy==='fauna'?`${e.name} dévoré par ${e.killedByName}`
+        :`${e.name} tué par ${e.killedByName}`; break;
+    case 'combat':       icon='⚔️'; txt=`${e.aName}(−${e.dmgB}) vs ${e.bName}(−${e.dmgA})`+(e.dodgeA?' 🌀':'')+(e.dodgeB?' 🌀':'')+(e.wA&&e.wA!=='Poings'?` [${e.wA}]`:''); break;
     case 'collect':      icon='📦'; txt=`${e.name} → ${e.supply}`; break;
     case 'heal':         icon='💚'; txt=`${e.name} +${e.amount} PV`; break;
-    case 'zone':         icon='🔴'; txt=`Zone → rayon ${e.radius}`; break;
-    case 'zone_damage':  icon='🔥'; txt=`${e.name} brûle (−${e.damage})`; break;
     case 'winner':       icon='👑';big=true; txt=`${e.name} GAGNE !`; break;
     case 'event':        icon='⚠️'; txt=e.text; big=true; break;
     default: return null;
@@ -1267,7 +1634,9 @@ function NarrCard({e,champs}) {
                craft_fail:'❌',forage:'🍃',truce:'🤝',trap_trigger:'🪤',cold:'🥶',
                betrayal:'🗡️',alliance:'🤝',berserk:'😡',traumatized:'😨',
                exhausted:'😴',fire_damage:'🔥',cold_snap:'❄️',
-               ability:'⚡',poison:'☠️',bleed:'🩸',stun_end:'💫'}[sub]||'📌';
+               ability:'⚡',poison:'☠️',bleed:'🩸',stun_end:'💫',
+               hunger:'🍗',thirst:'💧',temperature:'🌡️',water:'🌊',
+               fauna_attack:'🐺',hunt:'🏹',loot_weapon:'⚔️'}[sub]||'📌';
   const bg  = NARR_COLORS[sub]||'#111122';
   const ts  = e.tick!=null ? tickLabel(e.tick) : '—';
   return (

@@ -101,6 +101,58 @@ const CRAFT_RECIPES = [
     onSuccess:{giveItem:'ration'}, failMsg:'Les provisions moisissent avant d\'être prêtes.' },
 ];
 
+// ── Traits de personnalité ────────────────────────────────────────────────
+const TRAITS = {
+  paranoid:     { label:'Paranoïaque',  icon:'👁' },
+  honorable:    { label:'Honorable',    icon:'🛡' },
+  bloodthirsty: { label:'Sanguinaire',  icon:'🩸' },
+  coward:       { label:'Lâche',        icon:'😨' },
+  protector:    { label:'Protecteur',   icon:'🫂' },
+  resourceful:  { label:'Débrouillard', icon:'🔧' },
+  loner:        { label:'Solitaire',    icon:'🌑' },
+  brave:        { label:'Courageux',    icon:'⚡' },
+};
+const TRAIT_KEYS  = Object.keys(TRAITS);
+const TRAIT_INCOMPAT = [
+  ['bloodthirsty','coward'],['bloodthirsty','honorable'],['loner','protector']
+];
+
+// ── Progression XP / Niveaux ──────────────────────────────────────────────
+const XP_PER_TICK  = 0.3;   // gain passif par tick de survie
+const XP_PER_KILL  = 20;
+const XP_PER_CRAFT = 8;
+const XP_PER_HUNT  = 5;
+const XP_PER_FLORA = 2;
+const XP_PER_CAMP  = 0.5;   // bonus en camp par tick
+const XP_LEVELS    = [0, 50, 120, 220, 350, 500]; // seuils levels 1→5
+const LEVELUP_STATS = {
+  berserker:   ['strength','endurance','strength','endurance'],
+  hunter:      ['instinct','speed','instinct','speed'],
+  survivor:    ['survival','endurance','survival','instinct'],
+  opportunist: ['instinct','speed','instinct','survival'],
+  tank:        ['defense','endurance','defense','strength'],
+  soldier:     ['strength','defense','instinct','endurance'],
+};
+
+// ── Déplétion des POIs ────────────────────────────────────────────────────
+const POI_DEPLETION = {
+  water:   { maxUses: 30, recovery: 60, label:'asséchée'   },
+  loot:    { maxUses: 15, recovery: 80, label:'épuisée'    },
+  craft:   { maxUses: 25, recovery: 50, label:'pillée'     },
+  cover:   { maxUses: 40, recovery: 40, label:'dévastée'   },
+  shelter: { maxUses: 60, recovery:100, label:'surpeuplée' },
+};
+
+// ── Consignes preset ──────────────────────────────────────────────────────
+const INSTRUCTION_PRESETS = [
+  { key:'agressif',    label:'⚔️ Agressif',   instr:'agressif combat attaque' },
+  { key:'furtif',      label:'👁 Furtif',      instr:'fuit évite cache discret' },
+  { key:'survie',      label:'🌿 Survie',      instr:'survie nourriture ressource' },
+  { key:'exploration', label:'🗺 Exploration', instr:'explor bouger découv' },
+  { key:'camp',        label:'🏕 Camp',        instr:'repos camp calme' },
+  { key:'chasse',      label:'🎯 Chasse',      instr:'chasse traque proie' },
+];
+
 // ── Archétypes ────────────────────────────────────────────────────────────
 const ARCH = {
   berserker:   { icon:'⚔️',  label:'Berserker',   preferCraft:'crude_weapon', preferPOI:'cornucopia' },
@@ -219,6 +271,35 @@ function craftSuccessChance(champ, recipe) {
   return Math.min(0.92, p);
 }
 
+// ── Helpers traits / progression ─────────────────────────────────────────
+function pickTraits() {
+  const t1 = TRAIT_KEYS[rng(0, TRAIT_KEYS.length-1)];
+  if (Math.random() > 0.60) return [t1];            // 40% → 1 seul trait
+  const pool = TRAIT_KEYS.filter(k => k!==t1 &&
+    !TRAIT_INCOMPAT.some(pair=>pair.includes(t1)&&pair.includes(k)));
+  if (!pool.length) return [t1];
+  return [t1, pool[rng(0, pool.length-1)]];
+}
+
+function levelUpChamp(c, tick, events) {
+  const lvl     = c.level;
+  const statArr = LEVELUP_STATS[c.archetype] || ['strength','endurance','speed','instinct'];
+  const stat    = statArr[Math.min(lvl-2, statArr.length-1)];
+  c.stats[stat] = Math.min(10, (c.stats[stat]||3) + 1);
+  c.maxHp      += 20;
+  c.hp          = Math.min(c.maxHp, c.hp + 20);
+  c.morale      = Math.min(100, (c.morale||80) + 20);
+  events.push({type:'narr',sub:'levelup',id:c.id,name:c.name,tick,
+    text:`atteint le niveau ${lvl} ! (+1 ${STAT_LBL[stat]||stat}, +20 PV max) ⭐`});
+}
+
+function checkLevelUp(c, tick, events) {
+  while (c.level < 5 && (c.xp||0) >= XP_LEVELS[c.level]) {
+    c.level++;
+    levelUpChamp(c, tick, events);
+  }
+}
+
 // ── Make champion ─────────────────────────────────────────────────────────
 function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
   const [sMin,sMax]=spawnRange;
@@ -247,6 +328,10 @@ function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
     _grudge: {},            // { champId: intensity } — rancune
     _pursuitCooldown: 0,    // tick jusqu'auquel cet ennemi n'est pas pourchassé
     _approachTick: 0,       // tick de début de phase d'approche
+    traits:   pickTraits(),
+    level:    1,
+    xp:       0,
+    instructions: null,
     _activity:{ type:'idle', startTick:0, craftId:null },
     _mentalState:'normal', _mentalStateTick:0,
     _combatTicks:0, _journal:[], _lastNarrTick:-99,
@@ -318,7 +403,7 @@ function createSimState(cfg={}) {
     map:{
       biome,
       width:WORLD, height:WORLD,
-      pois:BASE_POIS.map(p=>({...p})),
+      pois:BASE_POIS.map(p=>({...p, _uses:0, _depleted:false})),
       loots:Array.from({length:8+count},(_,i)=>({
         id:`loot_${i}`,
         x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
@@ -361,8 +446,8 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
   const nearWater = nearFlora.find(f=>f.type==='waterSource');
   const nearFood  = nearFlora.find(f=>FLORA_DEFS[f.type]?.food>0);
   const prefPOI   = pois.find(p=>p.id===(ARCH[c.archetype]||ARCH.soldier).preferPOI);
-  const shelterPOI= pois.find(p=>!p._disabled&&(p.effect==='shelter'||p.effect==='cover'));
-  const waterPOI  = pois.find(p=>!p._disabled&&(p.effect==='water'));
+  const shelterPOI= pois.find(p=>!p._disabled&&!p._depleted&&(p.effect==='shelter'||p.effect==='cover'));
+  const waterPOI  = pois.find(p=>!p._disabled&&!p._depleted&&(p.effect==='water'));
 
   // Portée de détection — réduite la nuit et lors d'événements météo
   const baseDetect = 270;
@@ -525,6 +610,22 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
   if (instr.match(/repos|dor|camp|calme/)) {
     scores.rest_camp += 5; scores.seek_shelter += 3;
   }
+  if (instr.match(/chasse|traque|proie/)) {
+    scores.hunt_animal += 5; scores.attack_ranged += 2; scores.explore += 2;
+  }
+
+  // ── Modificateurs traits ───────────────────────────────────────────────
+  (c.traits||[]).forEach(t => {
+    if (t==='paranoid')     { scores.flee_enemy=Math.round(scores.flee_enemy*1.6); scores.seek_shelter+=2; }
+    if (t==='bloodthirsty') { scores.attack_melee=Math.round(scores.attack_melee*1.5); scores.attack_ranged=Math.round(scores.attack_ranged*1.4); scores.flee_enemy=Math.round(scores.flee_enemy*0.4); }
+    if (t==='coward')       { if(hpR<0.65) scores.flee_enemy+=4; scores.flee_enemy=Math.round(scores.flee_enemy*1.8); scores.attack_melee=Math.round(scores.attack_melee*0.5); }
+    if (t==='resourceful')  { scores.seek_food=Math.round(scores.seek_food*1.5); scores.seek_water=Math.round(scores.seek_water*1.5); scores.hunt_animal=Math.round(scores.hunt_animal*1.3); }
+    if (t==='brave')        { scores.attack_melee=Math.round(scores.attack_melee*1.3); scores.flee_enemy=Math.round(scores.flee_enemy*0.6); }
+    if (t==='protector' && allyId) {
+      const allyCh=alive.find(e=>e.id===allyId);
+      if (allyCh&&allyCh.hp/allyCh.maxHp<0.4) { scores.seek_shelter+=3; scores.flee_enemy+=2; }
+    }
+  });
 
   // ── Tirage pondéré ────────────────────────────────────────────────────
   const entries = Object.entries(scores).filter(([,v])=>v>0);
@@ -680,6 +781,7 @@ function resolveCrafts(alive, tick, events, traps, matchStats) {
     if (success) {
       matchStats.totalCrafts++;
       c.simStats.crafts++;
+      c.xp = (c.xp||0)+XP_PER_CRAFT;
       if (recipe.onSuccess.heal)      c.hp = Math.min(c.maxHp, c.hp+recipe.onSuccess.heal);
       if (recipe.onSuccess.stat)      c.buffs.push({stat:recipe.onSuccess.stat,value:recipe.onSuccess.value,ticks:recipe.onSuccess.ticks});
       if (recipe.onSuccess.placeTrap) traps.push({id:`trap_${tick}_${c.id}`,x:c.x+rng(-4,4),y:c.y+rng(-4,4),ownerId:c.id});
@@ -722,7 +824,9 @@ function tryAlliance(alive, state, events) {
     const c1=alive.find(c=>c.id===id1), c2=alive.find(c=>c.id===id2);
     if (!c1||!c2) return false;
     const elapsed = state.tick - al.formedTick;
-    const betrayChance = 0.015*(elapsed/al.duration) +
+    const hasHonorable = (c1.traits||[]).includes('honorable')||(c2.traits||[]).includes('honorable');
+    const betrayChance = hasHonorable ? 0 :
+      0.015*(elapsed/al.duration) +
       ((c1.archetype==='opportunist'||c2.archetype==='opportunist') ? 0.04 : 0);
     if (elapsed > al.duration*0.5 && Math.random()<betrayChance) {
       const betrayer = c1.archetype==='opportunist' ? c1 : c2;
@@ -743,6 +847,7 @@ function tryAlliance(alive, state, events) {
   for (let i=0; i<alive.length; i++) {
     for (let j=i+1; j<alive.length; j++) {
       const a=alive[i], b=alive[j];
+      if ((a.traits||[]).includes('loner')||(b.traits||[]).includes('loner')) continue;
       if (dist(a,b)>135) continue;
       if ((state.alliances||[]).some(al=>al.ids.includes(a.id)||al.ids.includes(b.id))) continue;
       const bothWeak   = a.hp/a.maxHp<0.45 && b.hp/b.maxHp<0.45;
@@ -930,6 +1035,36 @@ function distributeToJournals(champions, events) {
   });
 }
 
+// ── Déplétion des POIs ────────────────────────────────────────────────────
+function tickPoiDepletion(state, aliveChamps, events) {
+  const pois = state.map.pois;
+  // Récupération
+  pois.forEach(p => {
+    if (p._depleted && state.tick >= (p._recoverTick||0)) {
+      p._depleted = false;
+      p._uses = 0;
+      events.push({type:'event',evType:'poi_recover',tick:state.tick,
+        text:`🌱 ${p.name} s'est régénérée — ressources à nouveau disponibles !`});
+    }
+  });
+  if (state.tick % 3 !== 0) return;
+  // Déplétion par présence de champions
+  pois.forEach(p => {
+    if (p._depleted || !POI_DEPLETION[p.effect]) return;
+    const lim  = POI_DEPLETION[p.effect];
+    const here = aliveChamps.filter(c => dist(c, p) < p.radius).length;
+    if (here > 0) {
+      p._uses = (p._uses||0) + here;
+      if (p._uses >= lim.maxUses) {
+        p._depleted   = true;
+        p._recoverTick = state.tick + lim.recovery;
+        events.push({type:'event',evType:'poi_depleted',tick:state.tick,
+          text:`⚠️ ${p.name} est ${lim.label} — ressources épuisées pour ${lim.recovery} ticks.`});
+      }
+    }
+  });
+}
+
 // ── tickSim ───────────────────────────────────────────────────────────────
 function tickSim(prev) {
   if (prev.status!=='active') return prev;
@@ -946,8 +1081,13 @@ function tickSim(prev) {
     return state;
   }
 
-  // Survie tick
-  alive.forEach(c=>c.simStats.survivedTicks++);
+  // Survie tick + XP passif
+  alive.forEach(c => {
+    c.simStats.survivedTicks++;
+    c.xp = (c.xp||0) + XP_PER_TICK;
+    if (c._activity?.type==='campfire') c.xp += XP_PER_CAMP;
+    checkLevelUp(c, state.tick, events);
+  });
 
   // ── Survie : faim / soif / température / fatigue ─────────────────────
   const biomeTemp = {forêt:50, désert:82, toundra:12, marais:55, montagne:18};
@@ -1020,7 +1160,7 @@ function tickSim(prev) {
   alive.forEach(c=>{
     c._eff = {...c.stats};
     c.buffs.forEach(b=>{ if(c._eff[b.stat]!==undefined) c._eff[b.stat]+=b.value; });
-    const nearPOI = state.map.pois.find(p=>!p._disabled&&dist(c,p)<p.radius);
+    const nearPOI = state.map.pois.find(p=>!p._disabled&&!p._depleted&&dist(c,p)<p.radius);
     if (nearPOI?.effect==='vision')  c._eff.instinct  = Math.min(10,c._eff.instinct+2);
     if (nearPOI?.effect==='water')   c._eff.endurance = Math.min(10,c._eff.endurance+1);
     if (nearPOI?.effect==='shelter'&&isNight) c._eff.defense=Math.min(10,c._eff.defense+2);
@@ -1040,6 +1180,9 @@ function tickSim(prev) {
     if ((c.thirst??100) < 25) c._eff.instinct = Math.max(1, c._eff.instinct - 1);
     applyMentalEffects(c);
   });
+
+  // Déplétion POIs
+  tickPoiDepletion(state, alive.filter(c=>c.hp>0), events);
 
   // Heal survie — camp (cooldown plus long)
   alive.forEach(c=>{
@@ -1172,6 +1315,7 @@ function tickSim(prev) {
       f.hp = 0; // tuer l'animal
       c.hunger  = Math.min(100, (c.hunger??100) + def.food);
       c.thirst  = Math.min(100, (c.thirst??100) + def.water);
+      c.xp = (c.xp||0)+XP_PER_HUNT; checkLevelUp(c, state.tick, events);
       events.push({type:'narr',sub:'hunt',id:c.id,name:c.name,tick:state.tick,
         text:`chasse et abat un ${def.label} (+${def.food} 🍗 +${def.water} 💧)`});
       break;
@@ -1222,6 +1366,7 @@ function tickSim(prev) {
             text:`cueille des ${def.label} (${parts.join(' ')})`});
         }
       }
+      c.xp = (c.xp||0)+XP_PER_FLORA; checkLevelUp(c, state.tick, events);
       f.collected = true;
       f.respawnTick = state.tick + 80;
       break;
@@ -1391,6 +1536,7 @@ function tickSim(prev) {
       if (a.hp<=0) {
         b.simStats.kills++;
         b.reputation = (b.reputation||0)+1;
+        b.xp = (b.xp||0)+XP_PER_KILL; checkLevelUp(b, state.tick, events);
         if(b._memory)b._memory.lastAttackerId=null;
         events.push({type:'death',champion:a.id,name:a.name,killedBy:b.id,killedByName:b.name});
         // Trauma pour témoins proches
@@ -1409,6 +1555,7 @@ function tickSim(prev) {
       if (b.hp<=0) {
         a.simStats.kills++;
         a.reputation = (a.reputation||0)+1;
+        a.xp = (a.xp||0)+XP_PER_KILL; checkLevelUp(a, state.tick, events);
         if(a._memory)a._memory.lastAttackerId=null;
         events.push({type:'death',champion:b.id,name:b.name,killedBy:a.id,killedByName:a.name});
         alive.filter(x=>x.id!==b.id&&x.id!==a.id&&dist(x,b)<120&&x._mentalState==='normal').forEach(w=>{
@@ -1471,6 +1618,7 @@ const NARR_COLORS = {
   hunger:'#2a1500', thirst:'#001a2e', temperature:'#1a000d',
   water:'#00111a', fauna_attack:'#1a1200', hunt:'#0a1a0a',
   loot_weapon:'#1a1505', survival:'#1a0a00',
+  levelup:'#0d1a05', flee:'#1a1a00',
 };
 
 export default function SimulateurScreen() {
@@ -1521,6 +1669,14 @@ export default function SimulateurScreen() {
     runChunk();
   },[]);
   const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)}); return s; }),[]);
+  const setInstruction = useCallback((champId, instr) => {
+    setSim(p => {
+      const s = JSON.parse(JSON.stringify(p));
+      const c = s.champions.find(x=>x.id===champId);
+      if (c) c.instructions = c.instructions===instr ? null : instr; // toggle off
+      return s;
+    });
+  }, []);
   const cycSpd = useCallback(()=>setSpeed(s=>s===1500?800:s===800?300:s===300?100:1500),[]);
 
   const speedLabel = {1500:'🐢 Posé',800:'⚡ Normal',300:'🚀 Rapide',100:'⏩ Turbo'}[speed]||`${speed}ms`;
@@ -1605,7 +1761,8 @@ export default function SimulateurScreen() {
                         <View style={[s.hpF,{width:`${Math.round((c.thirst??100))}%`,backgroundColor:'#3498db'}]}/>
                       </View>
                       <Text style={s.cKills}>
-                        {c.simStats?.kills??0}💀 {WEAPON_DEFS[c.weapon||'fists']?.name?.slice(0,4)||'✊'}{msIco}{seIco}{inAl?' 🤝':''}{act&&act!=='idle'?` ${actIcon(act)}`:''}</Text>
+                        ⭐Lv{c.level||1} {c.simStats?.kills??0}💀 {WEAPON_DEFS[c.weapon||'fists']?.name?.slice(0,4)||'✊'}{msIco}{seIco}{inAl?' 🤝':''}{act&&act!=='idle'?` ${actIcon(act)}`:''}</Text>
+                      {(c.traits||[]).length>0&&<Text style={s.cTraits}>{(c.traits||[]).map(t=>TRAITS[t]?.icon||'').join('')}{c.instructions?' 📋':''}</Text>}
                     </>
                   ):<Text style={s.cDead}>☠</Text>}
                 </TouchableOpacity>
@@ -1706,6 +1863,44 @@ export default function SimulateurScreen() {
                   </View>
                 ):null;
               })}
+
+              {/* Niveau / XP */}
+              <View style={s.lvRow}>
+                <Text style={s.lvTxt}>⭐ Niveau {sel.level||1}</Text>
+                <View style={s.lvBar}>
+                  <View style={[s.lvFill,{
+                    width:`${Math.round(Math.min(100,((sel.xp||0)-XP_LEVELS[(sel.level||1)-1])/(((sel.level||1)<5?XP_LEVELS[sel.level||1]:XP_LEVELS[4]+150)-XP_LEVELS[(sel.level||1)-1])*100))}%`
+                  }]}/>
+                </View>
+                <Text style={s.lvXp}>{Math.round(sel.xp||0)} XP{(sel.level||1)<5?` / ${XP_LEVELS[sel.level||1]}`:' MAX'}</Text>
+              </View>
+
+              {/* Traits */}
+              {(sel.traits||[]).length>0&&(
+                <View style={s.traitRow}>
+                  {(sel.traits||[]).map(t=>(
+                    <View key={t} style={s.traitBadge}>
+                      <Text style={s.traitIco}>{TRAITS[t]?.icon}</Text>
+                      <Text style={s.traitLbl}>{TRAITS[t]?.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Consigne */}
+              <Text style={s.ms}>CONSIGNE</Text>
+              <View style={s.instrRow}>
+                {INSTRUCTION_PRESETS.map(p=>{
+                  const active = sel.instructions === p.instr;
+                  return (
+                    <TouchableOpacity key={p.key}
+                      style={[s.instrBtn, active&&s.instrBtnActive]}
+                      onPress={()=>setInstruction(sel.id, p.instr)}>
+                      <Text style={[s.instrTxt, active&&s.instrTxtActive]}>{p.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               {/* Survie */}
               <Text style={s.ms}>SURVIE</Text>
@@ -1881,7 +2076,7 @@ function NarrCard({e,champs}) {
                ability:'⚡',poison:'☠️',bleed:'🩸',stun_end:'💫',
                hunger:'🍗',thirst:'💧',temperature:'🌡️',water:'🌊',
                fauna_attack:'🐺',hunt:'🏹',loot_weapon:'⚔️',
-               flee:'🏃',survival:'💀'}[sub]||'📌';
+               flee:'🏃',survival:'💀',levelup:'⭐',poi_depleted:'⚠️',poi_recover:'🌱'}[sub]||'📌';
   const bg  = NARR_COLORS[sub]||'#111122';
   const ts  = e.tick!=null ? tickLabel(e.tick) : '—';
   return (
@@ -2171,6 +2366,28 @@ const s = StyleSheet.create({
   ablIco:{fontSize:22},
   ablName:{color:'#74b9ff',fontSize:13,fontWeight:'bold'},
   ablCd:{color:'#444',fontSize:9,marginTop:2},
+  // Niveau / XP
+  lvRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:6,marginTop:4},
+  lvTxt:{color:'#e2b96f',fontSize:12,fontWeight:'bold',minWidth:70},
+  lvBar:{flex:1,height:6,backgroundColor:'#1a1a2e',borderRadius:3,overflow:'hidden'},
+  lvFill:{height:6,backgroundColor:'#e2b96f',borderRadius:3},
+  lvXp:{color:'#666',fontSize:9,minWidth:56,textAlign:'right'},
+  // Traits
+  traitRow:{flexDirection:'row',flexWrap:'wrap',gap:6,marginBottom:6},
+  traitBadge:{flexDirection:'row',alignItems:'center',backgroundColor:'#1a1a2e',
+    borderRadius:12,paddingHorizontal:8,paddingVertical:4,gap:4,
+    borderWidth:1,borderColor:'#2a2a4a'},
+  traitIco:{fontSize:14},
+  traitLbl:{color:'#aaa',fontSize:10,fontWeight:'bold'},
+  // Consignes
+  instrRow:{flexDirection:'row',flexWrap:'wrap',gap:5,marginBottom:4},
+  instrBtn:{backgroundColor:'#1a1a2e',borderRadius:8,paddingHorizontal:8,paddingVertical:5,
+    borderWidth:1,borderColor:'#2a2a4a'},
+  instrBtnActive:{backgroundColor:'#e2b96f22',borderColor:'#e2b96f'},
+  instrTxt:{color:'#666',fontSize:10,fontWeight:'bold'},
+  instrTxtActive:{color:'#e2b96f'},
+  // Champion card traits mini
+  cTraits:{color:'#666',fontSize:9,marginTop:1},
 });
 
 // ── Config screen styles ──────────────────────────────────────────────────

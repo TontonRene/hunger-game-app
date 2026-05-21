@@ -101,20 +101,46 @@ const CRAFT_RECIPES = [
     onSuccess:{giveItem:'ration'}, failMsg:'Les provisions moisissent avant d\'être prêtes.' },
 ];
 
-// ── Traits de personnalité ────────────────────────────────────────────────
+// ── Traits de personnalité (style Project Zomboid) ────────────────────────
+// type: 'pos' = vert, 'neg' = rouge, 'neu' = ambre
+// statMod: modifs permanentes aux stats à la création
+// hpMod: modif permanente du HP max
 const TRAITS = {
-  paranoid:     { label:'Paranoïaque',  icon:'👁' },
-  honorable:    { label:'Honorable',    icon:'🛡' },
-  bloodthirsty: { label:'Sanguinaire',  icon:'🩸' },
-  coward:       { label:'Lâche',        icon:'😨' },
-  protector:    { label:'Protecteur',   icon:'🫂' },
-  resourceful:  { label:'Débrouillard', icon:'🔧' },
-  loner:        { label:'Solitaire',    icon:'🌑' },
-  brave:        { label:'Courageux',    icon:'⚡' },
+  // ── Positifs ────────────────────────────────────────────────────────
+  athlete:       { label:'Athlète',          icon:'🏃', type:'pos', statMod:{speed:+1,endurance:+1} },
+  strong:        { label:'Costaud',          icon:'💪', type:'pos', statMod:{strength:+2}, hpMod:+30 },
+  fast_healer:   { label:'Guérison rapide',  icon:'🩹', type:'pos' },
+  eagle_eye:     { label:'Œil de faucon',    icon:'🦅', type:'pos', statMod:{instinct:+1} },
+  forager:       { label:'Cueilleur',        icon:'🌿', type:'pos', statMod:{survival:+1} },
+  light_eater:   { label:'Petit appétit',    icon:'🥗', type:'pos' },
+  hydrated:      { label:'Économe en eau',   icon:'💧', type:'pos' },
+  night_owl:     { label:'Nocturne',         icon:'🦉', type:'pos' },
+  lucky:         { label:'Chanceux',         icon:'🍀', type:'pos' },
+  honorable:     { label:'Honorable',        icon:'⚜️', type:'pos' },
+  // ── Négatifs ────────────────────────────────────────────────────────
+  anxious:       { label:'Anxieux',          icon:'😰', type:'neg' },
+  heavy_eater:   { label:'Gros mangeur',     icon:'🍖', type:'neg' },
+  thirsty_trait: { label:'Assoiffé',         icon:'🫗', type:'neg' },
+  lazy:          { label:'Paresseux',        icon:'😴', type:'neg' },
+  fragile:       { label:'Fragile',          icon:'🦴', type:'neg', hpMod:-50 },
+  slow_trait:    { label:'Lent',             icon:'🐌', type:'neg', statMod:{speed:-2} },
+  shortsighted:  { label:'Myope',            icon:'👓', type:'neg' },
+  hemophiliac:   { label:'Hémophile',        icon:'🩸', type:'neg' },
+  impulsive:     { label:'Impulsif',         icon:'😤', type:'neg' },
+  cold_sensitive:{ label:'Frileux',          icon:'🥶', type:'neg' },
+  // ── Ambivalents (avantage ET inconvénient) ──────────────────────────
+  paranoid:      { label:'Paranoïaque',      icon:'👁', type:'neu' },
+  loner:         { label:'Solitaire',        icon:'🌑', type:'neu' },
+  bloodthirsty:  { label:'Sanguinaire',      icon:'💀', type:'neu' },
+  protector:     { label:'Protecteur',       icon:'🫂', type:'neu' },
+  gladiator:     { label:'Gladiateur',       icon:'🗡', type:'neu', statMod:{strength:+1,defense:-1} },
 };
 const TRAIT_KEYS  = Object.keys(TRAITS);
 const TRAIT_INCOMPAT = [
-  ['bloodthirsty','coward'],['bloodthirsty','honorable'],['loner','protector']
+  ['bloodthirsty','impulsive'],['bloodthirsty','anxious'],
+  ['slow_trait','athlete'],['light_eater','heavy_eater'],
+  ['hydrated','thirsty_trait'],['loner','protector'],
+  ['honorable','bloodthirsty'],['night_owl','shortsighted'],
 ];
 
 // ── Progression XP / Niveaux ──────────────────────────────────────────────
@@ -268,17 +294,35 @@ function craftSuccessChance(champ, recipe) {
   const req  = Array.isArray(recipe.requiredEffect) ? recipe.requiredEffect : [recipe.requiredEffect];
   const near = BASE_POIS.find(poi => req.includes(poi.effect) && dist(champ,poi)<poi.radius*1.5);
   if (near) p += 0.25;
-  return Math.min(0.92, p);
+  if ((champ.traits||[]).includes('lucky')) p += 0.20;
+  return Math.min(0.95, p);
 }
 
 // ── Helpers traits / progression ─────────────────────────────────────────
 function pickTraits() {
-  const t1 = TRAIT_KEYS[rng(0, TRAIT_KEYS.length-1)];
-  if (Math.random() > 0.60) return [t1];            // 40% → 1 seul trait
-  const pool = TRAIT_KEYS.filter(k => k!==t1 &&
-    !TRAIT_INCOMPAT.some(pair=>pair.includes(t1)&&pair.includes(k)));
-  if (!pool.length) return [t1];
-  return [t1, pool[rng(0, pool.length-1)]];
+  const neg = TRAIT_KEYS.filter(k=>TRAITS[k].type==='neg');
+  const pos = TRAIT_KEYS.filter(k=>TRAITS[k].type==='pos');
+  const neu = TRAIT_KEYS.filter(k=>TRAITS[k].type==='neu');
+
+  // Style PZ : biais vers les négatifs, parfois un positif compensateur
+  const pickOne = (exclude=[]) => {
+    const r = Math.random();
+    // 55% négatif, 28% positif, 17% neutre
+    const pool = (r<0.55?neg:r<0.83?pos:neu).filter(k=>
+      !exclude.includes(k) &&
+      !TRAIT_INCOMPAT.some(pair=>pair.includes(k)&&exclude.some(e=>pair.includes(e)))
+    );
+    return pool.length ? pool[rng(0,pool.length-1)] : null;
+  };
+
+  // 15% = 1 trait, 55% = 2 traits, 30% = 3 traits
+  const count = Math.random()<0.15 ? 1 : Math.random()<0.64 ? 2 : 3;
+  const result = [];
+  for (let i=0; i<count; i++) {
+    const t = pickOne(result);
+    if (t) result.push(t);
+  }
+  return result.length ? result : [neg[rng(0,neg.length-1)]];
 }
 
 function levelUpChamp(c, tick, events) {
@@ -307,8 +351,18 @@ function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
     strength:rng(3,8), speed:rng(3,8), defense:rng(2,6),
     endurance:rng(3,7), instinct:rng(2,7), survival:rng(2,7),
   };
+  const traits = pickTraits();
+  // Appliquer les modificateurs de stats des traits à la création
+  traits.forEach(t => {
+    const def = TRAITS[t];
+    if (def?.statMod) Object.entries(def.statMod).forEach(([st,v])=>{
+      if (stats[st]!==undefined) stats[st] = clamp(stats[st]+v, 1, 10);
+    });
+  });
   const endurance = stats.endurance || 3;
-  const maxHp = 300 + endurance * 30;   // ×3 — parties longues
+  let maxHp = 300 + endurance * 30;   // ×3 — parties longues
+  traits.forEach(t => { if(TRAITS[t]?.hpMod) maxHp += TRAITS[t].hpMod; });
+  maxHp = Math.max(150, maxHp);
   return {
     id, name, colorIdx,
     color: CHAMP_COLORS[colorIdx%CHAMP_COLORS.length],
@@ -328,7 +382,7 @@ function makeChamp(id, name, colorIdx, spawnRange=[200,700]) {
     _grudge: {},            // { champId: intensity } — rancune
     _pursuitCooldown: 0,    // tick jusqu'auquel cet ennemi n'est pas pourchassé
     _approachTick: 0,       // tick de début de phase d'approche
-    traits:   pickTraits(),
+    traits,
     level:    1,
     xp:       0,
     instructions: null,
@@ -450,9 +504,12 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
   const waterPOI  = pois.find(p=>!p._disabled&&!p._depleted&&(p.effect==='water'));
 
   // Portée de détection — réduite la nuit et lors d'événements météo
-  const baseDetect = 270;
+  const traitDetectBonus = (c.traits||[]).includes('eagle_eye') ? 90
+    : (c.traits||[]).includes('shortsighted') ? -90 : 0;
+  const baseDetect = 270 + traitDetectBonus;
+  const isNightOwl = (c.traits||[]).includes('night_owl');
   const detectRange = (activeEvent?.type==='fog'||activeEvent?.type==='sandstorm') ? 90
-    : isNight ? 150 : baseDetect;
+    : isNight && !isNightOwl ? 150 : baseDetect;
   const visTargets = targets.filter(e=>dist(e,c)<detectRange);
 
   // Ennemi le plus proche visible
@@ -616,14 +673,30 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
 
   // ── Modificateurs traits ───────────────────────────────────────────────
   (c.traits||[]).forEach(t => {
-    if (t==='paranoid')     { scores.flee_enemy=Math.round(scores.flee_enemy*1.6); scores.seek_shelter+=2; }
-    if (t==='bloodthirsty') { scores.attack_melee=Math.round(scores.attack_melee*1.5); scores.attack_ranged=Math.round(scores.attack_ranged*1.4); scores.flee_enemy=Math.round(scores.flee_enemy*0.4); }
-    if (t==='coward')       { if(hpR<0.65) scores.flee_enemy+=4; scores.flee_enemy=Math.round(scores.flee_enemy*1.8); scores.attack_melee=Math.round(scores.attack_melee*0.5); }
-    if (t==='resourceful')  { scores.seek_food=Math.round(scores.seek_food*1.5); scores.seek_water=Math.round(scores.seek_water*1.5); scores.hunt_animal=Math.round(scores.hunt_animal*1.3); }
-    if (t==='brave')        { scores.attack_melee=Math.round(scores.attack_melee*1.3); scores.flee_enemy=Math.round(scores.flee_enemy*0.6); }
-    if (t==='protector' && allyId) {
-      const allyCh=alive.find(e=>e.id===allyId);
-      if (allyCh&&allyCh.hp/allyCh.maxHp<0.4) { scores.seek_shelter+=3; scores.flee_enemy+=2; }
+    switch(t) {
+      // Positifs
+      case 'athlete':       scores.explore+=1; break;
+      case 'forager':       scores.seek_food=Math.round(scores.seek_food*1.6); scores.seek_water=Math.round(scores.seek_water*1.4); scores.hunt_animal=Math.round(scores.hunt_animal*1.5); break;
+      case 'night_owl':     if(isNight) { scores.explore+=2; scores.attack_melee+=1; } break;
+      case 'lucky':         scores.collect_supply=Math.round(scores.collect_supply*1.4); break;
+      case 'honorable':     break; // géré dans tryAlliance
+      // Négatifs
+      case 'anxious':       scores.flee_enemy=Math.round(scores.flee_enemy*1.6)+2; scores.seek_shelter+=2; scores.attack_melee=Math.round(scores.attack_melee*0.7); break;
+      case 'impulsive':     scores.attack_melee=Math.round(scores.attack_melee*1.6); scores.flee_enemy=0; scores.rest_camp=Math.round(scores.rest_camp*0.3); break;
+      case 'cold_sensitive':if(isNight||(c.temperature??50)<35) { scores.seek_shelter+=5; scores.rest_camp+=4; scores.attack_melee=Math.round(scores.attack_melee*0.5); } break;
+      case 'heavy_eater':   if(hungerR<0.5) scores.seek_food+=3; break;
+      case 'thirsty_trait': if(thirstR<0.5) scores.seek_water+=3; break;
+      case 'lazy':          scores.rest_camp=Math.round(scores.rest_camp*1.5); scores.explore=Math.round(scores.explore*0.6); break;
+      // Ambivalents
+      case 'paranoid':      scores.flee_enemy=Math.round(scores.flee_enemy*1.5); scores.seek_shelter+=2; break; // eagle_eye bonus déjà dans detectRange
+      case 'bloodthirsty':  scores.attack_melee=Math.round(scores.attack_melee*1.9); scores.attack_ranged=Math.round(scores.attack_ranged*1.5); scores.flee_enemy=0; scores.rest_camp=0; break;
+      case 'gladiator':     scores.attack_melee=Math.round(scores.attack_melee*1.6); scores.attack_ranged=Math.max(0,scores.attack_ranged-2); break;
+      case 'protector':
+        if (allyId) {
+          const allyCh=alive.find(e=>e.id===allyId);
+          if (allyCh&&allyCh.hp/allyCh.maxHp<0.4) { scores.seek_shelter+=3; scores.flee_enemy+=2; }
+        }
+        break;
     }
   });
 
@@ -802,7 +875,7 @@ function checkTraps(alive, traps, events, tick) {
     let triggered = false;
     for (const c of alive) {
       if (c.id===trap.ownerId||c.hp<=0) continue;
-      if (dist(c,trap)<15) {
+      if (dist(c,trap)<15 && !((c.traits||[]).includes('lucky')&&Math.random()<0.35)) {
         const dmg = rng(12,22);
         c.hp -= dmg; c.simStats.dmgTaken += dmg;
         events.push({type:'narr',sub:'trap_trigger',id:c.id,name:c.name,tick,
@@ -1093,8 +1166,10 @@ function tickSim(prev) {
   const biomeTemp = {forêt:50, désert:82, toundra:12, marais:55, montagne:18};
   alive.forEach(c=>{
     if (c.hp<=0) return;
-    c.hunger = Math.max(0, (c.hunger??100) - HUNGER_DRAIN);
-    c.thirst = Math.max(0, (c.thirst??100) - THIRST_DRAIN);
+    const hDrain = HUNGER_DRAIN * ((c.traits||[]).includes('heavy_eater')?1.7:(c.traits||[]).includes('light_eater')?0.55:1);
+    const tDrain = THIRST_DRAIN * ((c.traits||[]).includes('thirsty_trait')?1.7:(c.traits||[]).includes('hydrated')?0.55:1);
+    c.hunger = Math.max(0, (c.hunger??100) - hDrain);
+    c.thirst = Math.max(0, (c.thirst??100) - tDrain);
 
     // Température cible selon biome + nuit + abri
     const nearShelter = state.map.pois.find(p=>!p._disabled&&(p.effect==='shelter')&&dist(c,p)<p.radius*1.3);
@@ -1104,8 +1179,9 @@ function tickSim(prev) {
     c.temperature = clamp(c.temperature, 0, 100);
 
     // Morale : baisse progressivement mais remonte si on mange/se repose
-    const moraleGain = (c.hunger>60&&c.thirst>60 ? 0.3 : 0) + (c._activity?.type==='campfire' ? 0.5 : 0);
-    c.morale = clamp((c.morale??80) - 0.1 + moraleGain, 0, 100);
+    const moraleDecay = (c.traits||[]).includes('anxious') ? 0.22 : 0.1;
+    const moraleGain  = (c.hunger>60&&c.thirst>60 ? 0.3 : 0) + (c._activity?.type==='campfire' ? 0.5 : 0);
+    c.morale = clamp((c.morale??80) - moraleDecay + moraleGain, 0, 100);
 
     // ── Dégâts progressifs ────────────────────────────────────────────
     if (c.hunger <= 0) {
@@ -1127,19 +1203,21 @@ function tickSim(prev) {
     // Température extrême — protégée par abri/feu
     if (!hasFire && !nearShelter) {
       if (c.temperature < 12 || c.temperature > 82) {
-        const d = TEMP_DMG; c.hp -= d; c.simStats.dmgTaken += d;
+        const d = Math.round(TEMP_DMG * ((c.traits||[]).includes('cold_sensitive') ? 2.5 : 1));
+        c.hp -= d; c.simStats.dmgTaken += d;
         const msg = c.temperature < 12 ? `gèle sans feu ni abri (−${d} PV)` : `souffre de la chaleur (−${d} PV)`;
         if (state.tick%5===0) events.push({type:'narr',sub:'temperature',id:c.id,name:c.name,tick:state.tick,text:msg});
       }
     }
 
     // Régénération passive HP si bien nourri et reposé
+    const regenMult = (c.traits||[]).includes('fast_healer') ? 2.5 : 1;
     if (c.hunger > 50 && c.thirst > 50 && (c.fatigue||0) < 60) {
-      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE);
+      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE * regenMult);
     }
     // Regen bonus en camp
     if (c._activity?.type==='campfire') {
-      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE * 3);
+      c.hp = Math.min(c.maxHp, c.hp + HP_REGEN_RATE * 3 * regenMult);
       c.hunger = Math.min(100, c.hunger + 0.2);
       c.thirst = Math.min(100, c.thirst + 0.3);
     }
@@ -1230,10 +1308,12 @@ function tickSim(prev) {
       else return;
     }
     const stormSlow = (state.activeEvent?.type==='sandstorm'||state.activeEvent?.type==='fog') ? 0.55 : 1;
-    const nightSlow = isNight&&c.stats.instinct<=4 ? 0.6 : 1;
+    const nightSlow = isNight&&c.stats.instinct<=4&&!(c.traits||[]).includes('night_owl') ? 0.6 : 1;
     const spd = Math.max(1,c._eff.speed) * stormSlow * nightSlow;
     const {dx,dy} = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick);
-    c.fatigue = clamp((c.fatigue||0) + (dx===0&&dy===0 ? -FATIGUE_REST_IDLE : FATIGUE_SPRINT), 0, 100);
+    const fatMult = (c.traits||[]).includes('lazy') ? 1.7 : (c.traits||[]).includes('athlete') ? 0.6 : 1;
+    const fatDelta = dx===0&&dy===0 ? -(FATIGUE_REST_IDLE * fatMult) : FATIGUE_SPRINT * fatMult;
+    c.fatigue = clamp((c.fatigue||0) + fatDelta, 0, 100);
     if (dx===0 && dy===0) {
       // Repos actif — campfire si la nuit
       if (isNight && c._activity.type==='idle') c._activity = {type:'campfire', startTick:state.tick};
@@ -1432,8 +1512,10 @@ function tickSim(prev) {
       if (aOnCooldown && bOnCooldown) continue;
 
       // ── Fuite à 50% HP — instinct de survie fort ────────────────────
-      const aFlees = a.hp/a.maxHp < 0.50 && a.archetype!=='berserker' && Math.random()<0.65;
-      const bFlees = b.hp/b.maxHp < 0.50 && b.archetype!=='berserker' && Math.random()<0.65;
+      const aNoFlee = a.archetype==='berserker'||(a.traits||[]).includes('bloodthirsty')||(a.traits||[]).includes('impulsive');
+      const bNoFlee = b.archetype==='berserker'||(b.traits||[]).includes('bloodthirsty')||(b.traits||[]).includes('impulsive');
+      const aFlees = a.hp/a.maxHp < 0.50 && !aNoFlee && Math.random()<0.65;
+      const bFlees = b.hp/b.maxHp < 0.50 && !bNoFlee && Math.random()<0.65;
       if (aFlees) {
         const fd = away(b,a); a.x=clamp(a.x+fd.dx*a._eff.speed*1.5,0,WORLD-1); a.y=clamp(a.y+fd.dy*a._eff.speed*1.5,0,WORLD-1);
         a._pursuitCooldown = state.tick + 12;
@@ -1501,9 +1583,11 @@ function tickSim(prev) {
       a._combatTicks=(a._combatTicks||0)+1; b._combatTicks=(b._combatTicks||0)+1;
       if (finalDmgA>0&&a._memory) a._memory.lastAttackerId=b.id;
       if (finalDmgB>0&&b._memory) b._memory.lastAttackerId=a.id;
-      // Fatigue de combat
-      a.fatigue = clamp((a.fatigue||0)+FATIGUE_COMBAT, 0, 100);
-      b.fatigue = clamp((b.fatigue||0)+FATIGUE_COMBAT, 0, 100);
+      // Fatigue de combat (modulée par traits)
+      const cFatA = FATIGUE_COMBAT * ((a.traits||[]).includes('lazy')?1.5:(a.traits||[]).includes('athlete')?0.6:1);
+      const cFatB = FATIGUE_COMBAT * ((b.traits||[]).includes('lazy')?1.5:(b.traits||[]).includes('athlete')?0.6:1);
+      a.fatigue = clamp((a.fatigue||0)+cFatA, 0, 100);
+      b.fatigue = clamp((b.fatigue||0)+cFatB, 0, 100);
       // Blessure si coup lourd (malus speed durable)
       if (finalDmgA > a.maxHp*0.15) a.buffs.push({stat:'speed',value:-1,ticks:WOUND_TICKS});
       if (finalDmgB > b.maxHp*0.15) b.buffs.push({stat:'speed',value:-1,ticks:WOUND_TICKS});
@@ -1516,10 +1600,12 @@ function tickSim(prev) {
         b.statusEffects.push({type:'poison',ticks:8,srcId:a.id});
       if (!dB&&finalDmgA>0&&b.archetype==='hunter'&&Math.random()<0.25&&!a.statusEffects?.some(se=>se.type==='poison'))
         a.statusEffects.push({type:'poison',ticks:8,srcId:b.id});
-      if (!dA&&finalDmgB>0&&a.archetype==='berserker'&&Math.random()<0.30&&!b.statusEffects?.some(se=>se.type==='bleed'))
-        b.statusEffects.push({type:'bleed',ticks:12,srcId:a.id});
-      if (!dB&&finalDmgA>0&&b.archetype==='berserker'&&Math.random()<0.30&&!a.statusEffects?.some(se=>se.type==='bleed'))
-        a.statusEffects.push({type:'bleed',ticks:12,srcId:b.id});
+      const bBleedCh = (b.traits||[]).includes('hemophiliac')?0.65:a.archetype==='berserker'?0.30:0;
+      if (!dA&&finalDmgB>0&&bBleedCh>0&&Math.random()<bBleedCh&&!b.statusEffects?.some(se=>se.type==='bleed'))
+        b.statusEffects.push({type:'bleed',ticks:14,srcId:a.id});
+      const aBleedCh = (a.traits||[]).includes('hemophiliac')?0.65:b.archetype==='berserker'?0.30:0;
+      if (!dB&&finalDmgA>0&&aBleedCh>0&&Math.random()<aBleedCh&&!a.statusEffects?.some(se=>se.type==='bleed'))
+        a.statusEffects.push({type:'bleed',ticks:14,srcId:b.id});
       // Étourdissement (tank sur gros coup)
       if (!dA&&finalDmgB>=Math.floor(b.maxHp*0.22)&&a.archetype==='tank'&&Math.random()<0.20&&!b.statusEffects?.some(se=>se.type==='stun'))
         b.statusEffects.push({type:'stun',ticks:3,srcId:a.id});
@@ -1762,7 +1848,7 @@ export default function SimulateurScreen() {
                       </View>
                       <Text style={s.cKills}>
                         ⭐Lv{c.level||1} {c.simStats?.kills??0}💀 {WEAPON_DEFS[c.weapon||'fists']?.name?.slice(0,4)||'✊'}{msIco}{seIco}{inAl?' 🤝':''}{act&&act!=='idle'?` ${actIcon(act)}`:''}</Text>
-                      {(c.traits||[]).length>0&&<Text style={s.cTraits}>{(c.traits||[]).map(t=>TRAITS[t]?.icon||'').join('')}{c.instructions?' 📋':''}</Text>}
+                      {(c.traits||[]).length>0&&<Text style={s.cTraits}>{(c.traits||[]).map(t=>`${TRAITS[t]?.icon||''}`).join(' ')}{c.instructions?' 📋':''}</Text>}
                     </>
                   ):<Text style={s.cDead}>☠</Text>}
                 </TouchableOpacity>
@@ -1878,12 +1964,16 @@ export default function SimulateurScreen() {
               {/* Traits */}
               {(sel.traits||[]).length>0&&(
                 <View style={s.traitRow}>
-                  {(sel.traits||[]).map(t=>(
-                    <View key={t} style={s.traitBadge}>
-                      <Text style={s.traitIco}>{TRAITS[t]?.icon}</Text>
-                      <Text style={s.traitLbl}>{TRAITS[t]?.label}</Text>
-                    </View>
-                  ))}
+                  {(sel.traits||[]).map(t=>{
+                    const tr = TRAITS[t]||{};
+                    const col = tr.type==='pos'?'#2ecc71':tr.type==='neg'?'#e74c3c':'#f39c12';
+                    return (
+                      <View key={t} style={[s.traitBadge,{borderColor:col+'66'}]}>
+                        <Text style={s.traitIco}>{tr.icon}</Text>
+                        <Text style={[s.traitLbl,{color:col}]}>{tr.label}</Text>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
 

@@ -176,8 +176,10 @@ function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
 }
 
 // Centre iso de la map (pour camera par défaut)
+// On décale légèrement vers le bas (iy+20) pour mieux centrer visuellement
 function mapCenterIso() {
-  return wToIso(50, 50, 1);
+  const { ix, iy } = wToIso(50, 50, 1);
+  return { ix, iy: iy - 18 };
 }
 
 // ── Pool de paints ────────────────────────────────────────────────────────
@@ -525,9 +527,9 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   }
 
   // ── Minimap 2D (vue haut, en bas à gauche) ────────────────────────────────
-  const MM = 80, MMP = 8;
-  const mmx = MMP, mmy = H - MM - MMP;
-  const sc  = MM / (HM_CELLS * HM_CELL);
+  const MM = 72, MMP = 10;
+  const mmx = MMP, mmy = H - MM - MMP - 2;
+  const sc  = MM / 100;   // 100 = espace monde normalisé
 
   canvas.drawRect(Skia.XYWHRect(mmx-1, mmy-1, MM+2, MM+2), mkAlpha('#000000', 0.80));
   if (hm) {
@@ -708,6 +710,12 @@ export default function BattleMap({ battleState, onChampionTap }) {
     const hm    = battleState.map?.heightMap
       || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
+    // Normalisation → espace monde 0-100 (backend = 100×100, simulateur = 300×300)
+    const mapW = battleState.map?.width  || 100;
+    const mapH = battleState.map?.height || 100;
+    const sX   = 100 / mapW;
+    const sY   = 100 / mapH;
+
     // Pre-compute sorted tiles (une seule fois par heightmap)
     const prevHm = gvisRef.current.heightMap;
     if (hm !== prevHm) {
@@ -725,7 +733,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
     const prevMap = new Map((gvisRef.current.champions || []).map(cv => [cv.id, cv]));
     const champs  = (battleState.champions || []).map((c, i) => {
       const ex  = prevMap.get(c.id);
-      const tx  = c.x, ty = c.y;   // backend 0-100, pas de rescale
+      const tx  = c.x * sX, ty = c.y * sY;   // normalisé en 0-100
       return {
         id: c.id,
         x: ex ? ex.x : tx, y: ex ? ex.y : ty,
@@ -764,7 +772,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
     });
 
     const rawZone = battleState.map?.zone;
-    const zone    = rawZone || { cx:50, cy:50, radius:55 };
+    const zone    = rawZone
+      ? { cx: rawZone.cx * sX, cy: rawZone.cy * sY, radius: rawZone.radius * sX }
+      : { cx: 50, cy: 50, radius: 55 };
 
     gvisRef.current = {
       champions:     champs,
@@ -772,7 +782,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
       alliances:     battleState.alliances || [],
       dayPhase:      battleState.dayPhase  || 0,
       tick:          battleState.tick      || 0,
-      supplies:      battleState.map?.supplies || [],
+      supplies:      (battleState.map?.supplies || []).map(s => ({ ...s, x: s.x * sX, y: s.y * sY })),
       biome,
       heightMap:     hm,
       followId:      gvisRef.current.followId,

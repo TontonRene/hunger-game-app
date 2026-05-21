@@ -81,25 +81,59 @@ const BASE_POIS = [
 
 // ── Craft ─────────────────────────────────────────────────────────────────
 const CRAFT_RECIPES = [
-  { id:'crude_weapon', name:'Arme grossière',    icon:'🪓', requiredEffect:'craft',
+  // ── Tier 1 ────────────────────────────────────────────────────────────
+  { id:'crude_weapon', name:'Arme grossière',    icon:'🪓', tier:1, requiredEffect:'craft',
     duration:10, successStats:{instinct:0.35,survival:0.20,strength:0.15},
-    onSuccess:{stat:'strength',value:3,ticks:40}, failMsg:'La lame se brise avant d\'être terminée.' },
-  { id:'crude_armor',  name:'Armure de fortune', icon:'🛡', requiredEffect:'craft',
+    onSuccess:{stat:'strength',value:3,ticks:40,giveItem:'crude_weapon'}, failMsg:'La lame se brise avant d\'être terminée.' },
+  { id:'crude_armor',  name:'Armure de fortune', icon:'🛡', tier:1, requiredEffect:'craft',
     duration:12, successStats:{instinct:0.25,survival:0.25,endurance:0.20},
-    onSuccess:{stat:'defense',value:4,ticks:40},  failMsg:'Les sangles lâchent — armure inutilisable.' },
-  { id:'herbal_remedy',name:'Remède naturel',    icon:'🍃', requiredEffect:['water','cover'],
+    onSuccess:{stat:'defense',value:4,ticks:40,giveItem:'crude_armor'},  failMsg:'Les sangles lâchent — armure inutilisable.' },
+  { id:'herbal_remedy',name:'Remède naturel',    icon:'🍃', tier:1, requiredEffect:['water','cover'],
     duration:8,  successStats:{survival:0.45,instinct:0.20},
-    onSuccess:{heal:80}, failMsg:'Les herbes récoltées sont les mauvaises.' },
-  { id:'trap',         name:'Piège',             icon:'🪤', requiredEffect:'cover',
+    onSuccess:{heal:80,giveItem:'herbal_remedy'}, failMsg:'Les herbes récoltées sont les mauvaises.' },
+  { id:'trap',         name:'Piège',             icon:'🪤', tier:1, requiredEffect:'cover',
     duration:8,  successStats:{instinct:0.40,survival:0.25},
-    onSuccess:{placeTrap:true}, failMsg:'Le piège s\'effondre avant d\'être posé.' },
-  { id:'torch',        name:'Torche',            icon:'🔦', requiredEffect:['cover','shelter'],
+    onSuccess:{placeTrap:true,giveItem:'trap_kit'}, failMsg:'Le piège s\'effondre avant d\'être posé.' },
+  { id:'torch',        name:'Torche',            icon:'🔦', tier:1, requiredEffect:['cover','shelter'],
     duration:5,  successStats:{survival:0.35,instinct:0.15},
     onSuccess:{giveItem:'torch'}, failMsg:'Le bois est trop humide.' },
-  { id:'ration',       name:'Ration sèche',      icon:'🍖', requiredEffect:['cover','shelter'],
+  { id:'ration',       name:'Ration sèche',      icon:'🍖', tier:1, requiredEffect:['cover','shelter'],
     duration:6,  successStats:{survival:0.50,instinct:0.15},
     onSuccess:{giveItem:'ration'}, failMsg:'Les provisions moisissent avant d\'être prêtes.' },
+  // ── Tier 2 (nécessitent un objet tier 1 dans l'inventaire) ───────────
+  { id:'refined_weapon', name:'Arme affinée',    icon:'⚔️', tier:2, requires:'crude_weapon', requiredEffect:'craft',
+    duration:12, successStats:{instinct:0.45,strength:0.35,survival:0.10},
+    onSuccess:{stat:'strength',value:5,ticks:60,removeItem:'crude_weapon'}, failMsg:'L\'affûtage fend la lame en deux.' },
+  { id:'iron_armor',     name:'Armure de fer',   icon:'🛡️', tier:2, requires:'crude_armor', requiredEffect:'craft',
+    duration:14, successStats:{defense:0.50,endurance:0.25,strength:0.10},
+    onSuccess:{stat:'defense',value:6,ticks:70,removeItem:'crude_armor'}, failMsg:'Les plaques restent mal ajustées.' },
+  { id:'antidote',       name:'Antidote',        icon:'🧪', tier:2, requires:'herbal_remedy', requiredEffect:['water','cover'],
+    duration:10, successStats:{survival:0.65,instinct:0.20},
+    onSuccess:{heal:60,clearPoison:true,removeItem:'herbal_remedy'}, failMsg:'Le mélange est inefficace.' },
+  { id:'explosive_trap', name:'Piège explosif',  icon:'💣', tier:2, requires:'trap_kit', requiredEffect:'cover',
+    duration:12, successStats:{instinct:0.55,survival:0.25},
+    onSuccess:{placeBoostedTrap:true,removeItem:'trap_kit'}, failMsg:'L\'explosif rate son amorçage.' },
+  { id:'healing_salve',  name:'Baume cicatrisant',icon:'💊',tier:2, requires:'herbal_remedy', requiredEffect:['cover','shelter','water'],
+    duration:8, successStats:{survival:0.70,instinct:0.15},
+    onSuccess:{heal:130,removeItem:'herbal_remedy'}, failMsg:'Le baume se décompose trop vite.' },
 ];
+
+// ── Météo dynamique ──────────────────────────────────────────────────────
+const WEATHER_TYPES = {
+  clear:    { label:'Dégagé',     icon:'☀️', tempMod:  0,  thirstMod:1.0, hungerMod:1.0, speedPct:1.0, visionMod:1.0, dmg:0, duration:[40,80] },
+  rain:     { label:'Pluie',       icon:'🌧', tempMod:-10,  thirstMod:0.6, hungerMod:1.0, speedPct:0.88,visionMod:0.9, dmg:0, duration:[20,45] },
+  storm:    { label:'Orage',       icon:'⛈', tempMod:-18,  thirstMod:0.5, hungerMod:1.0, speedPct:0.72,visionMod:0.7, dmg:2, duration:[12,25] },
+  snowfall: { label:'Neige',       icon:'❄️', tempMod:-25,  thirstMod:0.7, hungerMod:1.3, speedPct:0.76,visionMod:0.85,dmg:0, duration:[15,35] },
+  heatwave: { label:'Canicule',    icon:'🔥', tempMod:+22,  thirstMod:1.9, hungerMod:1.2, speedPct:0.90,visionMod:1.0, dmg:0, duration:[15,28] },
+  fog:      { label:'Brouillard',  icon:'🌫', tempMod:  0,  thirstMod:1.0, hungerMod:1.0, speedPct:1.0, visionMod:0.5, dmg:0, duration:[10,22] },
+};
+const WEATHER_BIOME_POOL = {
+  'forêt':    ['clear','clear','rain','rain','storm','fog'],
+  'désert':   ['clear','clear','clear','heatwave','heatwave','storm'],
+  'toundra':  ['clear','snowfall','snowfall','storm','fog'],
+  'marais':   ['rain','rain','fog','fog','storm','clear'],
+  'montagne': ['clear','snowfall','storm','fog','clear'],
+};
 
 // ── Traits de personnalité (style Project Zomboid) ────────────────────────
 // type: 'pos' = vert, 'neg' = rouge, 'neu' = ambre
@@ -292,6 +326,8 @@ function getArch(stats) {
 
 // ── Craft success ─────────────────────────────────────────────────────────
 function craftSuccessChance(champ, recipe) {
+  // Vérifier prérequis items tier 2
+  if (recipe.requires && !(champ.items||[]).includes(recipe.requires)) return 0;
   const s  = champ.stats;
   let   p  = 0.20;
   Object.entries(recipe.successStats).forEach(([stat,weight])=>{
@@ -449,35 +485,85 @@ function generateFlora(biome, count) {
   });
 }
 
+function generateObstacles(biome, seed) {
+  // Zones de terrain difficile (ralentissent / blessent)
+  const rngO = (min,max) => min + Math.abs(Math.sin(seed*13.7+min+max)*99999%1) * (max-min) | 0;
+  const defs = {
+    'forêt':    [{type:'swamp',  label:'Marécage', color:'#2a4020', dmg:0.5, slowPct:0.7}],
+    'désert':   [{type:'lava',   label:'Sable brûlant',color:'#8b2500',dmg:1,  slowPct:0.85}],
+    'toundra':  [{type:'ice',    label:'Glace fine',  color:'#8ab4cc',dmg:0.3,slowPct:0.65}],
+    'marais':   [{type:'swamp',  label:'Marécage',    color:'#2a4020',dmg:0.8,slowPct:0.6},
+                 {type:'quicksand',label:'Sables mouvants',color:'#6b5530',dmg:1.2,slowPct:0.55}],
+    'montagne': [{type:'lava',   label:'Lave',        color:'#cc3300',dmg:2,  slowPct:0.9}],
+  };
+  const pool = defs[biome] || defs['forêt'];
+  const result = [];
+  const nb = 3 + rngO(0,4);
+  for (let i=0; i<nb; i++) {
+    const def = pool[i%pool.length];
+    result.push({
+      id:`obs_${i}`, ...def,
+      x: rngO(ISLAND_EDGE+60, WORLD-ISLAND_EDGE-60),
+      y: rngO(ISLAND_EDGE+60, WORLD-ISLAND_EDGE-60),
+      radius: rngO(30, 70),
+    });
+  }
+  return result;
+}
+
 function createSimState(cfg={}) {
   const count      = clamp(cfg.champCount||8, 4, 24);
   const names      = (cfg.champNames||CHAMP_NAMES).slice(0,count);
   const sizeCfg    = MAP_SIZES[cfg.mapSize||'M'];
   const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne'][rng(0,4)];
-  const champs     = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,sizeCfg.spawn,
+  const hasCornuco = cfg.cornucopia !== false; // activé par défaut
+  const mapSeed    = Date.now() % 999983;
+
+  // Champions : spawn centre si cornucopia, sinon carte entière
+  const cornRange = [380, 520];
+  const champs    = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,
+    hasCornuco ? cornRange : sizeCfg.spawn,
     cfg.champBuilds?.[i]?.traits || null));
+
   const faunaCount = 22 + count * 2;
   const floraCount = 40 + count * 3;
+
+  // Loots de la cornucopia + loots dispersés
+  const cornuLoots = hasCornuco ? Array.from({length:Math.min(count,12)},(_,i)=>({
+    id:`corn_${i}`,
+    x: 450 + rng(-60, 60),
+    y: 450 + rng(-60, 60),
+    type:['sword','spear','bow','shield','soin','soin','armure','festin','force','vitesse'][i%10],
+    _dropTick: 0,
+  })) : [];
+
+  const scatterLoots = Array.from({length:6+count},(_,i)=>({
+    id:`loot_${i}`,
+    x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
+    y:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
+    type:['sword','spear','bow','shield','soin','soin','armure','festin'][i%8],
+    _dropTick: hasCornuco ? 20 + i * 3 : i * 4, // loot dispersé apparaît après cornucopia
+  }));
+
   return {
     id:'sim_local', tick:0, status:'active', winner:null,
     events:[], narrative:[],
     dayPhase:0, alliances:[], activeEvent:null,
     lastEventTick:0,
+    simPhase: hasCornuco ? 'cornucopia' : 'main',
+    weather: 'clear', weatherTick: 0,
+    sponsorPts: 15, // points sponsor disponibles
     matchStats:{ totalCombats:0, totalCrafts:0, waterDeaths:0, alliancesFormed:0, betrayals:0 },
     map:{
       biome,
       width:WORLD, height:WORLD,
+      mapSeed,
       pois:BASE_POIS.map(p=>({...p, _uses:0, _depleted:false})),
-      loots:Array.from({length:8+count},(_,i)=>({
-        id:`loot_${i}`,
-        x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
-        y:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
-        type:['sword','spear','bow','shield','soin','soin','armure','festin'][i%8],
-        _dropTick: i * 4,
-      })),
-      supplies:[],traps:[],
-      fauna:  generateFauna(faunaCount),
-      flora:  generateFlora(biome, floraCount),
+      loots:[...cornuLoots, ...scatterLoots],
+      supplies:[], traps:[],
+      fauna:    generateFauna(faunaCount),
+      flora:    generateFlora(biome, floraCount),
+      obstacles:generateObstacles(biome, mapSeed),
     },
     champions:champs,
   };
@@ -864,13 +950,16 @@ function resolveCrafts(alive, tick, events, traps, matchStats) {
     if (success) {
       matchStats.totalCrafts++;
       c.simStats.crafts++;
-      c.xp = (c.xp||0)+XP_PER_CRAFT;
-      if (recipe.onSuccess.heal)      c.hp = Math.min(c.maxHp, c.hp+recipe.onSuccess.heal);
-      if (recipe.onSuccess.stat)      c.buffs.push({stat:recipe.onSuccess.stat,value:recipe.onSuccess.value,ticks:recipe.onSuccess.ticks});
-      if (recipe.onSuccess.placeTrap) traps.push({id:`trap_${tick}_${c.id}`,x:c.x+rng(-4,4),y:c.y+rng(-4,4),ownerId:c.id});
-      if (recipe.onSuccess.giveItem)  c.items.push(recipe.onSuccess.giveItem);
+      c.xp = (c.xp||0)+XP_PER_CRAFT*(recipe.tier===2?2:1);
+      if (recipe.onSuccess.heal)            c.hp = Math.min(c.maxHp, c.hp+recipe.onSuccess.heal);
+      if (recipe.onSuccess.stat)            c.buffs.push({stat:recipe.onSuccess.stat,value:recipe.onSuccess.value,ticks:recipe.onSuccess.ticks});
+      if (recipe.onSuccess.placeTrap)       traps.push({id:`trap_${tick}_${c.id}`,x:c.x+rng(-4,4),y:c.y+rng(-4,4),ownerId:c.id,dmg:22});
+      if (recipe.onSuccess.placeBoostedTrap)traps.push({id:`trap_${tick}_${c.id}`,x:c.x+rng(-4,4),y:c.y+rng(-4,4),ownerId:c.id,dmg:50,boosted:true});
+      if (recipe.onSuccess.giveItem)        c.items.push(recipe.onSuccess.giveItem);
+      if (recipe.onSuccess.removeItem)      c.items = (c.items||[]).filter(it=>it!==recipe.onSuccess.removeItem);
+      if (recipe.onSuccess.clearPoison)     c.statusEffects = (c.statusEffects||[]).filter(se=>se.type!=='poison');
       events.push({type:'narr',sub:'craft_ok',id:c.id,name:c.name,craftId:recipe.id,tick,
-        text:`réussit à fabriquer ${recipe.icon} ${recipe.name} !`});
+        text:`réussit à fabriquer ${recipe.icon} ${recipe.name}${recipe.tier===2?' ✨ (Tier 2)':''}!`});
     } else {
       events.push({type:'narr',sub:'craft_fail',id:c.id,name:c.name,craftId:recipe.id,tick,
         text:recipe.failMsg});
@@ -886,7 +975,7 @@ function checkTraps(alive, traps, events, tick) {
     for (const c of alive) {
       if (c.id===trap.ownerId||c.hp<=0) continue;
       if (dist(c,trap)<15 && !((c.traits||[]).includes('lucky')&&Math.random()<0.35)) {
-        const dmg = rng(12,22);
+        const dmg = trap.boosted ? rng(38,58) : rng(12,(trap.dmg||22));
         c.hp -= dmg; c.simStats.dmgTaken += dmg;
         events.push({type:'narr',sub:'trap_trigger',id:c.id,name:c.name,tick,
           text:`tombe dans un piège ! (−${dmg} PV)`});
@@ -1118,6 +1207,25 @@ function distributeToJournals(champions, events) {
   });
 }
 
+// ── Météo ─────────────────────────────────────────────────────────────────
+function tickWeather(state, events) {
+  if (!state.weather) { state.weather='clear'; state.weatherTick=0; }
+  const wDef   = WEATHER_TYPES[state.weather];
+  const elapsed = state.tick - (state.weatherTick||0);
+  const [minD, maxD] = wDef.duration;
+  if (elapsed >= minD && (elapsed >= maxD || Math.random() < 0.025)) {
+    const pool  = WEATHER_BIOME_POOL[state.map.biome] || ['clear','rain','storm'];
+    const newW  = pool[Math.floor(Math.random()*pool.length)];
+    if (newW !== state.weather) {
+      state.weather    = newW;
+      state.weatherTick= state.tick;
+      const nd = WEATHER_TYPES[newW];
+      events.push({type:'event',evType:'weather',tick:state.tick,
+        text:`${nd.icon} Météo : ${nd.label} !`});
+    }
+  }
+}
+
 // ── Déplétion des POIs ────────────────────────────────────────────────────
 function tickPoiDepletion(state, aliveChamps, events) {
   const pois = state.map.pois;
@@ -1164,6 +1272,20 @@ function tickSim(prev) {
     return state;
   }
 
+  // ── Phase Cornucopia → transition vers main ───────────────────────────
+  if (state.simPhase === 'cornucopia' && state.tick >= 18) {
+    state.simPhase = 'main';
+    events.push({type:'event',evType:'cornucopia_end',tick:state.tick,
+      text:`⚔️ La Cornucopia est terminée ! Les survivants fuient dans l'arène.`});
+  }
+
+  // ── Météo ─────────────────────────────────────────────────────────────
+  tickWeather(state, events);
+  const wDef = WEATHER_TYPES[state.weather] || WEATHER_TYPES.clear;
+
+  // ── Sponsor regen ─────────────────────────────────────────────────────
+  state.sponsorPts = Math.min(30, (state.sponsorPts||0) + 0.3);
+
   // Survie tick + XP passif
   alive.forEach(c => {
     c.simStats.survivedTicks++;
@@ -1176,22 +1298,40 @@ function tickSim(prev) {
   const biomeTemp = {forêt:50, désert:82, toundra:12, marais:55, montagne:18};
   alive.forEach(c=>{
     if (c.hp<=0) return;
-    const hDrain = HUNGER_DRAIN * ((c.traits||[]).includes('heavy_eater')?1.7:(c.traits||[]).includes('light_eater')?0.55:1);
-    const tDrain = THIRST_DRAIN * ((c.traits||[]).includes('thirsty_trait')?1.7:(c.traits||[]).includes('hydrated')?0.55:1);
+    const hDrain = HUNGER_DRAIN * ((c.traits||[]).includes('heavy_eater')?1.7:(c.traits||[]).includes('light_eater')?0.55:1) * wDef.hungerMod;
+    const tDrain = THIRST_DRAIN * ((c.traits||[]).includes('thirsty_trait')?1.7:(c.traits||[]).includes('hydrated')?0.55:1) * wDef.thirstMod;
     c.hunger = Math.max(0, (c.hunger??100) - hDrain);
     c.thirst = Math.max(0, (c.thirst??100) - tDrain);
 
-    // Température cible selon biome + nuit + abri
+    // Température cible selon biome + nuit + abri + météo
     const nearShelter = state.map.pois.find(p=>!p._disabled&&(p.effect==='shelter')&&dist(c,p)<p.radius*1.3);
     const hasFire     = c._activity?.type==='campfire' || c.items?.includes('torch');
-    const tTarget = (biomeTemp[state.map.biome]||50) + (isNight ? -15 : 0) + (hasFire ? 20 : 0) + (nearShelter ? 8 : 0);
+    const tTarget = (biomeTemp[state.map.biome]||50) + wDef.tempMod + (isNight ? -15 : 0) + (hasFire ? 20 : 0) + (nearShelter ? 8 : 0);
     c.temperature = c.temperature==null ? 50 : c.temperature + (tTarget - c.temperature)*0.12 + noise(2);
     c.temperature = clamp(c.temperature, 0, 100);
 
     // Morale : baisse progressivement mais remonte si on mange/se repose
-    const moraleDecay = (c.traits||[]).includes('anxious') ? 0.22 : 0.1;
+    const stormy = state.weather === 'storm';
+    const moraleDecay = ((c.traits||[]).includes('anxious') ? 0.22 : 0.1) + (stormy ? 0.08 : 0);
     const moraleGain  = (c.hunger>60&&c.thirst>60 ? 0.3 : 0) + (c._activity?.type==='campfire' ? 0.5 : 0);
     c.morale = clamp((c.morale??80) - moraleDecay + moraleGain, 0, 100);
+
+    // ── Dégâts météo directs (orage) ──────────────────────────────────
+    if (wDef.dmg > 0 && !hasFire && !nearShelter && Math.random() < 0.04) {
+      const wd = Math.round(wDef.dmg * rng(1,3));
+      c.hp -= wd; c.simStats.dmgTaken += wd;
+      if (state.tick%7===0) events.push({type:'narr',sub:'storm',id:c.id,name:c.name,tick:state.tick,
+        text:`est frappé par la foudre ! (−${wd} PV)`});
+    }
+
+    // ── Obstacles de terrain (zones difficiles) ───────────────────────
+    const inObstacle = (state.map.obstacles||[]).find(o=>dist(c,o)<o.radius);
+    if (inObstacle && Math.random() < 0.08) {
+      const od = Math.ceil(inObstacle.dmg * rng(1,3));
+      if (od > 0) { c.hp -= od; c.simStats.dmgTaken += od;
+        if (state.tick%10===0) events.push({type:'narr',sub:'terrain',id:c.id,name:c.name,tick:state.tick,
+          text:`s'enlise dans ${inObstacle.label} (−${od} PV)`}); }
+    }
 
     // ── Dégâts progressifs ────────────────────────────────────────────
     if (c.hunger <= 0) {
@@ -1319,8 +1459,33 @@ function tickSim(prev) {
     }
     const stormSlow = (state.activeEvent?.type==='sandstorm'||state.activeEvent?.type==='fog') ? 0.55 : 1;
     const nightSlow = isNight&&c.stats.instinct<=4&&!(c.traits||[]).includes('night_owl') ? 0.6 : 1;
-    const spd = Math.max(1,c._eff.speed) * stormSlow * nightSlow;
-    const {dx,dy} = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick);
+    const weatherSlow = wDef.speedPct;
+    const obstSlow  = (state.map.obstacles||[]).find(o=>dist(c,o)<o.radius) ? (state.map.obstacles.find(o=>dist(c,o)<o.radius).slowPct||0.7) : 1;
+    const spd = Math.max(1,c._eff.speed) * stormSlow * nightSlow * weatherSlow * obstSlow;
+
+    // ── Phase Cornucopia : IA rush vers centre + combat agressif ──────
+    let dx, dy;
+    if (state.simPhase === 'cornucopia') {
+      const center = {x:450, y:450};
+      const distC  = dist(c, center);
+      const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
+      const nearest = enemies.length?enemies.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p):null;
+      const isFighter = ['berserker','gladiator','soldier'].includes(c.archetype);
+      if (nearest && dist(nearest,c) < 80 && (isFighter||Math.random()<0.5)) {
+        // Combat cornucopia agressif
+        const t2 = nearest;
+        dx = sign(t2.x-c.x)||noise(1); dy = sign(t2.y-c.y)||noise(1);
+      } else if (distC > 40) {
+        // Foncer vers la cornucopia
+        dx = sign(center.x-c.x); dy = sign(center.y-c.y);
+      } else {
+        // Sur place : grab supplies
+        dx = noise(1); dy = noise(1);
+      }
+    } else {
+      const r = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick);
+      dx = r.dx; dy = r.dy;
+    }
     const fatMult = (c.traits||[]).includes('lazy') ? 1.7 : (c.traits||[]).includes('athlete') ? 0.6 : 1;
     const fatDelta = dx===0&&dy===0 ? -(FATIGUE_REST_IDLE * fatMult) : FATIGUE_SPRINT * fatMult;
     c.fatigue = clamp((c.fatigue||0) + fatDelta, 0, 100);
@@ -1764,7 +1929,40 @@ export default function SimulateurScreen() {
     };
     runChunk();
   },[]);
-  const drop   = useCallback(type=>setSim(p=>{ const s=JSON.parse(JSON.stringify(p)); s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)}); return s; }),[]);
+  const [sponsorTarget, setSponsorTarget] = useState(null); // champId ciblé
+
+  const drop   = useCallback((type, targetChampId=null, cost=2)=>setSim(p=>{
+    const s=JSON.parse(JSON.stringify(p));
+    if ((s.sponsorPts||0) < cost) return p; // pas assez de pts
+    s.sponsorPts = (s.sponsorPts||0) - cost;
+    if (targetChampId) {
+      // Colis ciblé : spawn près du champion
+      const tc = s.champions.find(c=>c.id===targetChampId&&c.hp>0);
+      const tx = tc ? clamp(tc.x+rng(-30,30),ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10);
+      const ty = tc ? clamp(tc.y+rng(-30,30),ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10);
+      s.map.supplies.push({id:`sup_${Date.now()}`,type,x:tx,y:ty,_targeted:targetChampId});
+      s.events.push({type:'event',evType:'sponsor',tick:s.tick,text:`🎁 Colis sponsor pour ${tc?.name||'?'} !`});
+    } else {
+      s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)});
+    }
+    return s;
+  }),[]);
+
+  const sponsorHeal = useCallback((champId)=>setSim(p=>{
+    const s=JSON.parse(JSON.stringify(p));
+    const cost = 5;
+    if ((s.sponsorPts||0) < cost) return p;
+    const c = s.champions.find(x=>x.id===champId&&x.hp>0);
+    if (!c) return p;
+    s.sponsorPts -= cost;
+    const heal = 120;
+    c.hp = Math.min(c.maxHp, c.hp+heal);
+    c.hunger = Math.min(100, (c.hunger||100)+30);
+    c.thirst = Math.min(100, (c.thirst||100)+30);
+    s.events.push({type:'event',evType:'sponsor',tick:s.tick,
+      text:`💉 Colis médical sponsor pour ${c.name} ! (+${heal} PV)`});
+    return s;
+  }),[]);
   const setInstruction = useCallback((champId, instr) => {
     setSim(p => {
       const s = JSON.parse(JSON.stringify(p));
@@ -1809,9 +2007,13 @@ export default function SimulateurScreen() {
       <View style={s.statsBar}>
         <Chip val={alive.length}  lbl="Vivants" />
         <Chip val={sim.tick}      lbl="Tick" />
-        <Chip val={(sim.map.fauna||[]).filter(f=>f.hp>0).length} lbl="Faune" color="#27ae60" />
         <Chip val={`${timeIcon} J${Math.floor(sim.tick/DAY_LEN)+1}`} lbl="Jour" />
-        <Chip val={sim.map.biome} lbl="Biome"  small />
+        {sim.weather&&sim.weather!=='clear'
+          ? <Chip val={`${WEATHER_TYPES[sim.weather]?.icon} ${WEATHER_TYPES[sim.weather]?.label}`} lbl="Météo" color="#74b9ff" small/>
+          : <Chip val="☀️" lbl="Météo" small/>}
+        {sim.simPhase==='cornucopia'
+          ? <Chip val="⚔️ CORNUCOPIA" lbl="Phase" color="#e2b96f"/>
+          : <Chip val={sim.map.biome} lbl="Biome" small/>}
         {sim.alliances.length>0&&<Chip val={`🤝${sim.alliances.length}`} lbl="Alliances" color="#e2b96f"/>}
       </View>
 
@@ -1876,16 +2078,51 @@ export default function SimulateurScreen() {
             <Btn label="🔄" onPress={reset} color="#1a1a2e" flex={0.6}/>
           </View>
 
-          {/* COLIS */}
+          {/* ── MODE SPONSOR ──────────────────────────────────────────── */}
           <View style={s.sup}>
-            <Text style={s.supLbl}>📦 Larguer</Text>
-            <View style={s.supRow}>
-              {SUPPLY_LIST.map(sl=>(
-                <TouchableOpacity key={sl.type} style={[s.supBtn,{borderColor:sl.color+'77'}]} onPress={()=>drop(sl.type)}>
-                  <Text style={[s.supTxt,{color:sl.color}]}>{sl.label}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={s.supHeader}>
+              <Text style={s.supLbl}>🎭 SPONSOR</Text>
+              <View style={s.spPtsBox}>
+                <Text style={[s.spPts,{color:(sim.sponsorPts||0)>=5?'#2ecc71':'#e74c3c'}]}>
+                  ⭐{Math.floor(sim.sponsorPts||0)} pts
+                </Text>
+              </View>
+              {/* Ciblage champion */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{maxWidth:160}}>
+                {alive.map(c=>(
+                  <TouchableOpacity key={c.id}
+                    style={[s.spTarget,sponsorTarget===c.id&&{borderColor:c.color,backgroundColor:c.color+'22'}]}
+                    onPress={()=>setSponsorTarget(t=>t===c.id?null:c.id)}>
+                    <View style={[s.nameDot,{backgroundColor:c.color,width:7,height:7,borderRadius:4}]}/>
+                    <Text style={[s.spTargetTxt,sponsorTarget===c.id&&{color:c.color}]} numberOfLines={1}>{c.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
+            <View style={s.supRow}>
+              {SUPPLY_LIST.map(sl=>{
+                const cost = sl.type==='soin'?2:sl.type==='armure'?3:3;
+                const canAfford = (sim.sponsorPts||0) >= cost;
+                return (
+                  <TouchableOpacity key={sl.type}
+                    style={[s.supBtn,{borderColor:sl.color+'77'},!canAfford&&{opacity:0.35}]}
+                    onPress={()=>canAfford&&drop(sl.type,sponsorTarget,cost)}>
+                    <Text style={[s.supTxt,{color:sl.color}]}>{sl.label}</Text>
+                    <Text style={s.spCost}>{cost}⭐</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {/* Soin direct */}
+              <TouchableOpacity
+                style={[s.supBtn,{borderColor:'#ff6b9d77'},(sim.sponsorPts||0)<5&&{opacity:0.35}]}
+                onPress={()=>sponsorTarget&&sponsorHeal(sponsorTarget)}>
+                <Text style={[s.supTxt,{color:'#ff6b9d'}]}>💉 Soin</Text>
+                <Text style={s.spCost}>5⭐</Text>
+              </TouchableOpacity>
+            </View>
+            {sponsorTarget&&<Text style={s.spTargetInfo}>
+              🎯 Ciblé : {alive.find(c=>c.id===sponsorTarget)?.name||'?'} · Drops atterrissent près de lui
+            </Text>}
           </View>
 
           {/* LOG COMBAT */}
@@ -2252,6 +2489,7 @@ function ConfigScreen({onStart}) {
   const [names,       setNames]      = useState([...CHAMP_NAMES.slice(0,8)]);
   const [editIdx,     setEditIdx]    = useState(null);
   const [editVal,     setEditVal]    = useState('');
+  const [cornucopia,  setCornucopia] = useState(true); // cérémonie d'ouverture
   // builds[i] = { traits: string[] } — un build par champion
   const [builds,      setBuilds]     = useState(()=>Array.from({length:8},()=>({traits:pickTraits()})));
   const [traitPicker, setTraitPicker]= useState(null); // index du champion en cours d'édition
@@ -2294,7 +2532,7 @@ function ConfigScreen({onStart}) {
     });
   };
 
-  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names, champBuilds:builds});
+  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names, champBuilds:builds, cornucopia});
 
   // Données du picker actuellement ouvert
   const pickerBuild = traitPicker !== null ? builds[traitPicker] : null;
@@ -2363,6 +2601,20 @@ function ConfigScreen({onStart}) {
           )
         ))}
       </View>
+
+      {/* ── Options de partie ───────────────────────────────────────── */}
+      <Text style={cs.sec}>OPTIONS DE PARTIE</Text>
+      <TouchableOpacity style={[cs.optionRow, cornucopia && cs.optionRowOn]}
+        onPress={()=>setCornucopia(v=>!v)}>
+        <Text style={cs.optionIco}>⚔️</Text>
+        <View style={{flex:1}}>
+          <Text style={[cs.optionLbl, cornucopia&&cs.optionLblOn]}>Cérémonie Cornucopia</Text>
+          <Text style={cs.optionDesc}>Tous les tributs spawn au centre — ruée initiale vers les ressources</Text>
+        </View>
+        <View style={[cs.toggle, cornucopia&&cs.toggleOn]}>
+          <Text style={cs.toggleTxt}>{cornucopia?'ON':'OFF'}</Text>
+        </View>
+      </TouchableOpacity>
 
       {/* ── Traits des tributs ───────────────────────────────────────── */}
       <Text style={cs.sec}>TRAITS DES TRIBUTS <Text style={cs.secSub}>(budget : {BASE_TRAIT_POINTS} pts → 0)</Text></Text>
@@ -2561,9 +2813,17 @@ const s = StyleSheet.create({
   boff:{opacity:0.28},
 
   sup:{backgroundColor:'#111122',paddingHorizontal:6,paddingVertical:4},
-  supLbl:{color:'#333',fontSize:8,marginBottom:3},
-  supRow:{flexDirection:'row',gap:4},
-  supBtn:{flex:1,backgroundColor:'#1a1a2e',borderRadius:6,paddingVertical:5,alignItems:'center',borderWidth:1},
+  supHeader:{flexDirection:'row',alignItems:'center',marginBottom:4,gap:6},
+  supLbl:{color:'#333',fontSize:8,marginRight:4},
+  spPtsBox:{backgroundColor:'#1a1a2e',borderRadius:6,paddingHorizontal:6,paddingVertical:2,borderWidth:1,borderColor:'#2a2a4a'},
+  spPts:{fontSize:10,fontWeight:'bold'},
+  spTarget:{flexDirection:'row',alignItems:'center',backgroundColor:'#1a1a2e',borderRadius:8,
+    paddingHorizontal:5,paddingVertical:3,marginRight:4,borderWidth:1,borderColor:'#2a2a4a',gap:4},
+  spTargetTxt:{color:'#666',fontSize:9,fontWeight:'bold',maxWidth:44},
+  spTargetInfo:{color:'#e2b96f',fontSize:9,marginTop:3,fontStyle:'italic'},
+  spCost:{color:'#666',fontSize:8,marginTop:1},
+  supRow:{flexDirection:'row',gap:4,flexWrap:'wrap'},
+  supBtn:{backgroundColor:'#1a1a2e',borderRadius:6,paddingVertical:5,paddingHorizontal:6,alignItems:'center',borderWidth:1,minWidth:46},
   supTxt:{fontSize:10,fontWeight:'bold'},
 
   log:{maxHeight:80,backgroundColor:'#07070f'},
@@ -2729,6 +2989,19 @@ const cs = StyleSheet.create({
   launch:{backgroundColor:'#e2b96f',borderRadius:14,paddingVertical:16,alignItems:'center',marginTop:28},
   launchTxt:{color:'#0d0d1a',fontWeight:'bold',fontSize:15,letterSpacing:2},
   launchSub:{color:'#0d0d1a99',fontSize:10,marginTop:4},
+
+  // ── Options toggle ─────────────────────────────────────────────────
+  optionRow:{flexDirection:'row',alignItems:'center',backgroundColor:'#111122',
+    borderRadius:10,padding:10,marginBottom:6,borderWidth:1,borderColor:'#1a1a2e',gap:8},
+  optionRowOn:{backgroundColor:'#0d1f0d',borderColor:'#2ecc7155'},
+  optionIco:{fontSize:20},
+  optionLbl:{color:'#666',fontSize:13,fontWeight:'bold'},
+  optionLblOn:{color:'#2ecc71'},
+  optionDesc:{color:'#333',fontSize:9,marginTop:2},
+  toggle:{backgroundColor:'#1a1a2e',borderRadius:8,paddingHorizontal:8,paddingVertical:4,
+    borderWidth:1,borderColor:'#2a2a4a'},
+  toggleOn:{backgroundColor:'#0d2a0d',borderColor:'#2ecc71'},
+  toggleTxt:{color:'#555',fontSize:11,fontWeight:'bold'},
 
   // ── Trait builds list ──────────────────────────────────────────────
   buildRow:{flexDirection:'row',alignItems:'center',backgroundColor:'#111122',

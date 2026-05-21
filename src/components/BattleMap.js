@@ -90,6 +90,28 @@ function tileColors(biome, h) {
   return pal[idx];
 }
 
+// ── Génération procédurale de rivières sur la heightmap ───────────────────
+function addRivers(hm, biome, rng) {
+  const nb = biome === 'marais' ? 3 : biome === 'forêt' ? 2 : biome === 'montagne' ? 2 : 1;
+  for (let r = 0; r < nb; r++) {
+    // Départ sur un bord (h élevé)
+    let gx = Math.floor(2 + rng() * (HM_CELLS - 4));
+    let gy = Math.floor(2 + rng() * (HM_CELLS - 4));
+    for (let step = 0; step < HM_CELLS * 2; step++) {
+      gx = Math.max(1, Math.min(HM_CELLS - 2, gx));
+      gy = Math.max(1, Math.min(HM_CELLS - 2, gy));
+      if (hm[gy][gx] > 0) hm[gy][gx] = Math.max(0, hm[gy][gx] - 1);
+      // Couler vers le voisin le plus bas
+      const nbrs = [[gx+1,gy],[gx-1,gy],[gx,gy+1],[gx,gy-1]].filter(([nx,ny])=>
+        nx>=1&&nx<HM_CELLS-1&&ny>=1&&ny<HM_CELLS-1);
+      const lowest = nbrs.sort((a,b)=>(hm[a[1]]?.[a[0]]??9)-(hm[b[1]]?.[b[0]]??9))[0];
+      if (!lowest) break;
+      [gx,gy] = lowest;
+      if (hm[gy][gx] === 0) break;
+    }
+  }
+}
+
 // ── HeightMap client (fallback si backend ne l'envoie pas) ────────────────
 function seededRNG(seed) {
   let h = seed | 0;
@@ -147,6 +169,8 @@ function clientHeightMap(biome, seed) {
       for (let gx = 2; gx < HM_CELLS - 2; gx++)
         if (hm[gy][gx] === 1 && rng() < 0.25) hm[gy][gx] = 0;
   }
+  // Ajouter des rivières procédurales
+  addRivers(hm, biome, rng);
   _HM_CACHE[key] = hm;
   return hm;
 }
@@ -584,12 +608,80 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     canvas.drawCircle(psx, psy, Math.max(1, p.r * Math.max(0.4, zoom*0.55)), mkAlpha(p.color, p.life*0.85));
   }
 
+  // ── Cornucopia — lueur dorée au centre au début de partie ────────────────
+  if (v.simPhase === 'cornucopia') {
+    const cx = 50, cy = 50;
+    const { ix: cix, iy: ciy } = wToIso(cx, cy, 1);
+    const csx = W/2 + (cix - camIx)*zoom;
+    const csy = H/2 + (ciy - camIy)*zoom;
+    const pulse = 0.5 + Math.sin(t * 3.5) * 0.5;
+    canvas.drawCircle(csx, csy, 110*zoom, mkAlpha('#e2b96f', 0.06 * pulse));
+    canvas.drawCircle(csx, csy,  70*zoom, mkAlpha('#e2b96f', 0.12 * pulse));
+    canvas.drawCircle(csx, csy,  35*zoom, mkAlpha('#ffe066', 0.24 * pulse));
+    canvas.drawCircle(csx, csy,  12*zoom, mkAlpha('#ffffff', 0.45 * pulse));
+  }
+
+  // ── Effets météo ─────────────────────────────────────────────────────────
+  const weather = v.weather || 'clear';
+  if (weather === 'fog') {
+    // Brouillard : couche laiteuse + patches
+    canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha('#b0c8d4', 0.18 + Math.sin(t*0.4)*0.04));
+    for (let fp=0; fp<6; fp++) {
+      const fx = ((Math.sin(t*0.12+fp*1.7)*0.5+0.5)*W*1.3-W*0.15);
+      const fy = ((Math.cos(t*0.08+fp*2.1)*0.5+0.5)*H*1.3-H*0.15);
+      canvas.drawCircle(fx, fy, 80+fp*22, mkAlpha('#c8dce8', 0.07+Math.sin(t*0.3+fp)*0.03));
+    }
+  } else if (weather === 'rain' || weather === 'storm') {
+    // Teinte bleue + lignes de pluie
+    const intensity = weather === 'storm' ? 0.22 : 0.10;
+    canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha('#1a3050', intensity));
+    const dropCount = weather === 'storm' ? 60 : 30;
+    for (let d=0; d<dropCount; d++) {
+      const angle = -75 * Math.PI / 180;
+      const speed = weather === 'storm' ? 2.0 : 1.1;
+      const dx = ((d*71 + t*speed*100*Math.cos(angle+Math.PI/2))%W);
+      const dy = ((d*53 + t*speed*100*Math.sin(angle+Math.PI/2))%H);
+      const len = (weather==='storm'?22:14)*(0.5+Math.random()*0.5);
+      const rp2 = Skia.Path.Make();
+      rp2.moveTo(dx, dy);
+      rp2.lineTo(dx+len*Math.cos(angle), dy+len*Math.sin(angle));
+      canvas.drawPath(rp2, mkStrokeA('#aad4f0', 0.8, weather==='storm'?0.55:0.28));
+    }
+    if (weather === 'storm') {
+      // Éclair occasionnel
+      const flashT = (t * 0.7) % 4;
+      if (flashT < 0.08) {
+        canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha('#e8eeff', 0.35));
+      }
+    }
+  } else if (weather === 'snowfall') {
+    // Flocons tombants
+    canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha('#dce8f8', 0.07));
+    for (let fl=0; fl<45; fl++) {
+      const fx = ((fl*127 + Math.sin(t*0.3+fl)*18)%W);
+      const fy = ((fl*73 + t*22*(0.5+fl*0.01))%H);
+      const fr2 = 1.2 + (fl%3)*0.8;
+      canvas.drawCircle(fx, fy, fr2, mkAlpha('#f0f8ff', 0.72));
+    }
+  } else if (weather === 'heatwave') {
+    // Légère teinte orange + distorsion shimmer (simulé avec bandes semi-transparentes)
+    canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha('#ff8822', 0.06));
+    for (let sh=0; sh<4; sh++) {
+      const sy2 = (sh*H/4 + t*8)%H;
+      canvas.drawRect(Skia.XYWHRect(0, sy2, W, 3), mkAlpha('#ffaa44', 0.04+Math.sin(t*2+sh)*0.02));
+    }
+  }
+
   // ── HUD ───────────────────────────────────────────────────────────────────
   if (fm) {
-    canvas.drawText(`${biome.toUpperCase()}  T${v.tick || 0}`, 8, 16, mkAlpha('#ffffff', 0.36), fm);
+    const weatherIco = v.weather && v.weather!=='clear' ? ` ${v.weather==='rain'?'🌧':v.weather==='storm'?'⛈':v.weather==='snowfall'?'❄':v.weather==='heatwave'?'🔥':v.weather==='fog'?'🌫':''}` : '';
+    canvas.drawText(`${biome.toUpperCase()}${weatherIco}  T${v.tick || 0}`, 8, 16, mkAlpha('#ffffff', 0.36), fm);
     if (followed) {
       const vLabel = `👁 ${followed.name}  ↑${followed.elevation||1}`;
       canvas.drawText(vLabel, 8, 32, mkAlpha('#e2b96f', 0.55), fm);
+    }
+    if (v.simPhase === 'cornucopia') {
+      canvas.drawText('⚔️ CORNUCOPIA', W/2 - 36, 22, mkAlpha('#e2b96f', 0.90), fm);
     }
   }
 
@@ -646,13 +738,15 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   // ── Caméra en espace iso ───────────────────────────────────────────────
   const { ix: defIx, iy: defIy } = mapCenterIso();
-  const camIx     = useRef(defIx);
-  const camIy     = useRef(defIy);
-  const zoom      = useRef(0.92);
-  const timeRef   = useRef(0);
-  const lastTs    = useRef(null);
-  const savedCam  = useRef({ ix: defIx, iy: defIy });
-  const savedZoom = useRef(0.92);
+  const camIx       = useRef(defIx);
+  const camIy       = useRef(defIy);
+  const zoom        = useRef(0.92);
+  const targetZoom  = useRef(0.92);  // zoom cible (interpolé en douceur)
+  const prevFollowId= useRef(null);  // détection changement follow → zoom auto
+  const timeRef     = useRef(0);
+  const lastTs      = useRef(null);
+  const savedCam    = useRef({ ix: defIx, iy: defIy });
+  const savedZoom   = useRef(0.92);
 
   // ── Interpolation tick ────────────────────────────────────────────────
   const lastTickRef = useRef(Date.now());
@@ -707,16 +801,36 @@ export default function BattleMap({ battleState, onChampionTap }) {
       lastTs.current = ts;
       timeRef.current = ts / 1000;
 
-      // Follow mode : caméra suit le champion en espace iso
+      // Follow mode : caméra suit le champion + zoom auto doux
       const fId = gvisRef.current.followId;
+      // Détection changement de follow → ajuster zoom cible
+      if (fId !== prevFollowId.current) {
+        if (fId) {
+          // Zoom avant sur le perso — niveau adapté
+          targetZoom.current = 2.8;
+        } else {
+          // Retour vue globale
+          targetZoom.current = 0.92;
+        }
+        prevFollowId.current = fId;
+      }
+      // Interpolation douce du zoom (lerp 6% par frame)
+      zoom.current += (targetZoom.current - zoom.current) * 0.06;
+
       if (fId) {
         const fc = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
         if (fc) {
           const hm = gvisRef.current.heightMap;
           const wz = hm ? getElev(fc.x, fc.y, hm) : 1;
           const { ix: tix, iy: tiy } = wToIso(fc.x, fc.y, wz);
-          camIx.current += (tix - camIx.current) * 0.09;
-          camIy.current += (tiy - camIy.current) * 0.09;
+          // Caméra plus serrée (lerp plus rapide au zoom avant)
+          const lerpF = 0.09 + (zoom.current - 0.92) * 0.015;
+          camIx.current += (tix - camIx.current) * lerpF;
+          camIy.current += (tiy - camIy.current) * lerpF;
+        } else {
+          // Champion mort → libérer caméra
+          gvisRef.current.followId = null;
+          setFollowInfo(null);
         }
       }
 
@@ -857,6 +971,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
       pendingSpawns: spawns,
       fauna:         (battleState.map?.fauna || []).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
       activeEvent:   battleState.activeEvent || null,
+      weather:       battleState.weather || 'clear',
+      simPhase:      battleState.simPhase || 'main',
     };
   }, [battleState]);
 
@@ -922,8 +1038,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
     .onEnd(() => {
       const { ix, iy } = mapCenterIso();
       camIx.current = ix; camIy.current = iy;
-      zoom.current = 0.92;
+      zoom.current = 0.92; targetZoom.current = 0.92;
       gvisRef.current.followId = null;
+      prevFollowId.current = null;
       setFollowInfo(null);
     })
     .runOnJS(true);

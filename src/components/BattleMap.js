@@ -1,7 +1,7 @@
 /**
- * BattleMap — React Native Skia (sans reanimated)
- * Rendu GPU via Skia PictureRecorder + requestAnimationFrame sur JS thread.
- * Compatible Expo Go SDK 54.
+ * BattleMap — Vue ISOMÉTRIQUE Skia PictureRecorder
+ * Tuiles cubes 3 faces, figurines géométriques, heightmap procédural
+ * @shopify/react-native-skia 2.2.12 · Expo Go SDK 54
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
@@ -11,35 +11,86 @@ import {
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-// ── Palettes ──────────────────────────────────────────────────────────────
+// ── Constantes isométriques ───────────────────────────────────────────────
+const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
+const TILE_H   = 12;   // hauteur du losange
+const TILE_Z   = 8;    // pixels par unité d'élévation
+const HM_CELLS = 20;   // grille heightmap 20×20
+const HM_CELL  = 5;    // unités monde par cellule (100/20 = 5)
+
+// ── Palettes champion / supply ────────────────────────────────────────────
 const CHAMP_COLORS = [
   '#e74c3c','#3498db','#2ecc71','#f39c12',
   '#9b59b6','#1abc9c','#e67e22','#ff6b9d',
   '#00b894','#fd79a8','#6c5ce7','#fdcb6e',
   '#e17055','#74b9ff','#a29bfe','#55efc4',
-  '#fab1a0','#81ecec','#d63031','#0984e3',
-  '#00cec9','#e84393','#b2bec3','#dfe6e9',
 ];
 const SUPPLY_COLORS = {
   soin:'#2ecc71', force:'#e74c3c', vitesse:'#3498db', armure:'#f39c12',
-};
-const POI_COLORS = {
-  loot:'#f39c12', shelter:'#6c6c8a', craft:'#8B6914',
-  water:'#1a5276', vision:'#888888', cover:'#1a4a16',
+  festin:'#ff9f43', adrenaline:'#ee5a24', camouflage:'#6ab04c', carte:'#f9ca24',
 };
 
-const WORLD = 300;
-
-// ── Couleur de terrain par biome (enrichi SoC) ───────────────────────────
-const BIOME_COLORS = {
-  'forêt':    { base:'#081408', mid:'#102010', accent:'#2a5220', edge:'#041004', glow:'#1a5a14' },
-  'désert':   { base:'#1e1208', mid:'#2e1c0a', accent:'#6e5e18', edge:'#110a04', glow:'#7a5c10' },
-  'toundra':  { base:'#080e18', mid:'#10182a', accent:'#1e3e5e', edge:'#04080e', glow:'#143060' },
-  'marais':   { base:'#060e06', mid:'#0c160c', accent:'#1e401e', edge:'#030603', glow:'#144414' },
-  'montagne': { base:'#0a0a12', mid:'#10101c', accent:'#30304e', edge:'#05050a', glow:'#202050' },
+// ── Couleurs iso par biome — [top, droite(ombre), gauche(lumière)] ─────────
+const BIOME_ISO = {
+  'forêt': [
+    ['#12220e','#0a140a','#0e1c0e'],   // h=0 eau/boue
+    ['#1e3c1a','#102010','#182e14'],   // h=1
+    ['#2a5224','#163014','#22421c'],   // h=2
+    ['#347c2c','#1e4418','#2a6224'],   // h=3
+    ['#3e9634','#245020','#32782a'],   // h=4
+    ['#5e8a3a','#385428','#4e7430'],   // h=5
+    ['#7a9c52','#4e6634','#668444'],   // h=6
+    ['#a0b870','#6a7c4a','#88a05c'],   // h=7
+  ],
+  'désert': [
+    ['#2a1e08','#180e04','#201408'],
+    ['#5a4818','#38300e','#4a3c14'],
+    ['#7e6a28','#52461a','#6a5820'],
+    ['#a08830','#6a5c20','#887428'],
+    ['#c0a03c','#806c28','#a08832'],
+    ['#d4b44a','#8c7830','#b89c3e'],
+    ['#e0c460','#968040','#c0a650'],
+    ['#f0d888','#a09060','#d4bc6e'],
+  ],
+  'toundra': [
+    ['#0e1424','#060c16','#0a1020'],
+    ['#243662','#122038','#1c2c54'],
+    ['#3a5488','#1e3050','#2e4470'],
+    ['#8ab0d0','#5a7898','#74a0b8'],
+    ['#b4d4ee','#7a9ab0','#98c0d4'],
+    ['#cce4f8','#8aacbf','#aecce8'],
+    ['#e0f0ff','#9ab4c4','#c8dcf0'],
+    ['#f4faff','#b0c8d4','#d8ecf8'],
+  ],
+  'marais': [
+    ['#0a1a10','#04100a','#08140e'],
+    ['#183020','#0e1e14','#12261a'],
+    ['#264830','#142a1c','#1e3c28'],
+    ['#34603e','#1c3822','#2a5034'],
+    ['#427848','#22422a','#346040'],
+    ['#5a8850','#325236','#4a7044'],
+    ['#729e62','#465e3c','#60885a'],
+    ['#90b87a','#607248','#7ca068'],
+  ],
+  'montagne': [
+    ['#101018','#080810','#0c0c14'],
+    ['#28283e','#141420','#202034'],
+    ['#3c3c5e','#1e1e30','#2e2e4e'],
+    ['#58587e','#2c2c44','#484868'],
+    ['#7878a0','#3e3e58','#686888'],
+    ['#9898ba','#505068','#80809e'],
+    ['#bcbcd4','#6e6e82','#a0a0b8'],
+    ['#dcdce8','#9090a0','#c4c4d4'],
+  ],
 };
 
-// ── Terrain décoratif (procédural, seedé par biome) ──────────────────────
+function tileColors(biome, h) {
+  const pal = BIOME_ISO[biome] || BIOME_ISO['forêt'];
+  const idx  = Math.max(0, Math.min(7, h));
+  return pal[idx];
+}
+
+// ── HeightMap client (fallback si backend ne l'envoie pas) ────────────────
 function seededRNG(seed) {
   let h = seed | 0;
   return () => {
@@ -48,56 +99,134 @@ function seededRNG(seed) {
     return ((h ^ (h >>> 16)) >>> 0) / 0xffffffff;
   };
 }
-
-const _TERRAIN_CACHE = {};
-function genTerrainDecor(biome) {
-  if (_TERRAIN_CACHE[biome]) return _TERRAIN_CACHE[biome];
-  const seed = (biome || 'forêt').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const rng  = seededRNG(seed);
-  const items = [];
-  // 50 rochers + buissons épars sur la carte monde
-  for (let i = 0; i < 50; i++) {
-    items.push({
-      x: rng() * WORLD,
-      y: rng() * WORLD,
-      r: rng() * 5 + 2,
-      type: rng() > 0.45 ? 'rock' : 'bush',
-      a: rng() * 0.18 + 0.06,
-    });
-  }
-  _TERRAIN_CACHE[biome] = items;
-  return items;
+function strHash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = Math.imul(31, h) + s.charCodeAt(i) | 0;
+  return h;
 }
 
-// ── Étoiles ───────────────────────────────────────────────────────────────
-const STARS = Array.from({length:120},()=>({
-  fx:Math.random(), fy:Math.random(),
-  r:Math.random()*1.2+0.3, tw:Math.random()*Math.PI*2,
-}));
+const _HM_CACHE = {};
+function clientHeightMap(biome, seed) {
+  const key = (biome || 'forêt') + (seed || 'x');
+  if (_HM_CACHE[key]) return _HM_CACHE[key];
+  const profiles = {
+    'forêt':    { peaks:4,  maxH:4, spread:9,  water:false },
+    'désert':   { peaks:3,  maxH:3, spread:11, water:false },
+    'toundra':  { peaks:7,  maxH:6, spread:5,  water:false },
+    'marais':   { peaks:2,  maxH:2, spread:13, water:true  },
+    'montagne': { peaks:10, maxH:7, spread:4,  water:false },
+  };
+  const cfg = profiles[biome] || profiles['forêt'];
+  const rng = seededRNG(strHash(key));
+  const peaks = [];
+  for (let i = 0; i < cfg.peaks; i++) peaks.push({
+    x: 2 + rng() * (HM_CELLS - 4), y: 2 + rng() * (HM_CELLS - 4),
+    h: 1 + rng() * cfg.maxH, sp: cfg.spread * (0.5 + rng() * 0.8),
+  });
+  const hm = [];
+  for (let gy = 0; gy < HM_CELLS; gy++) {
+    hm[gy] = [];
+    for (let gx = 0; gx < HM_CELLS; gx++) {
+      let tw = 0, th = 0;
+      peaks.forEach(p => {
+        const d = Math.hypot(gx - p.x, gy - p.y);
+        const w = 1 / (Math.pow(d / p.sp, 2) + 0.4);
+        tw += w; th += p.h * w;
+      });
+      let elev = th / tw + (rng() - 0.5) * 0.9;
+      const edge = Math.min(gx, gy, HM_CELLS - 1 - gx, HM_CELLS - 1 - gy);
+      if (edge < 3) elev = Math.min(elev, 2 + edge);
+      hm[gy][gx] = Math.max(1, Math.min(7, Math.round(elev)));
+    }
+  }
+  if (cfg.water) {
+    for (let gy = 2; gy < HM_CELLS - 2; gy++)
+      for (let gx = 2; gx < HM_CELLS - 2; gx++)
+        if (hm[gy][gx] === 1 && rng() < 0.25) hm[gy][gx] = 0;
+  }
+  _HM_CACHE[key] = hm;
+  return hm;
+}
 
-// ── Système de particules ─────────────────────────────────────────────────
-// Chaque particule : {x, y, vx, vy, life, decay, r, color, gravity}
-// Toutes les coordonnées sont en espace MONDE (0-300), converties lors du draw
+function getElev(wx, wy, hm) {
+  if (!hm) return 1;
+  const gx = Math.max(0, Math.min(HM_CELLS - 1, Math.floor(wx / HM_CELL)));
+  const gy = Math.max(0, Math.min(HM_CELLS - 1, Math.floor(wy / HM_CELL)));
+  return (hm[gy] || [])[gx] ?? 1;
+}
+
+// ── Projection isométrique ────────────────────────────────────────────────
+// wx,wy en unités monde (0-100), wz en unités hauteur (0-7)
+// → position iso en pixels (espace iso, avant zoom/caméra)
+function wToIso(wx, wy, wz) {
+  const gx = wx / HM_CELL;
+  const gy = wy / HM_CELL;
+  return {
+    ix: (gx - gy) * (TILE_W / 2),
+    iy: (gx + gy) * (TILE_H / 2) - (wz || 0) * TILE_Z,
+  };
+}
+
+// iso → écran
+function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
+  return {
+    sx: W / 2 + (ix - camIx) * zoom,
+    sy: H / 2 + (iy - camIy) * zoom,
+  };
+}
+
+// Centre iso de la map (pour camera par défaut)
+function mapCenterIso() {
+  return wToIso(50, 50, 1);
+}
+
+// ── Pool de paints ────────────────────────────────────────────────────────
+let _FP = null, _AP = null, _SP = null, _SAP = null;
+// Pool de paths réutilisables (évite GC intensif sur les tiles)
+let _tp = null, _rp = null, _lp = null;  // top, right, left tile faces
+const _CC = {};
+
+function _initPool() {
+  if (_FP) return;
+  _FP  = Skia.Paint();
+  _AP  = Skia.Paint();
+  _SP  = Skia.Paint(); _SP.setStyle(PaintStyle.Stroke);
+  _SAP = Skia.Paint(); _SAP.setStyle(PaintStyle.Stroke);
+  _tp  = Skia.Path.Make();
+  _rp  = Skia.Path.Make();
+  _lp  = Skia.Path.Make();
+}
+function _c(s) { return _CC[s] || (_CC[s] = Skia.Color(s)); }
+
+function mkFill(col) { _FP.setColor(_c(col)); _FP.setAlphaf(1);    return _FP; }
+function mkAlpha(col,a) { _AP.setColor(_c(col)); _AP.setAlphaf(a); return _AP; }
+function mkStroke(col,w) {
+  _SP.setPathEffect(null); _SP.setColor(_c(col));
+  _SP.setStrokeWidth(w);   _SP.setAlphaf(1); return _SP;
+}
+function mkStrokeA(col,w,a) {
+  _SAP.setPathEffect(null); _SAP.setColor(_c(col));
+  _SAP.setStrokeWidth(w);   _SAP.setAlphaf(a); return _SAP;
+}
+
+// ── Système de particules (coordonnées monde) ─────────────────────────────
 function spawnParticles(pool, wx, wy, type, color) {
   const cfgs = {
-    combat: { n:6,  spd:[50,120], lt:[0.35,0.65], r:[0.8,2.2], grav:20,  cols:[color,'#ff8844','#ffdd44'] },
-    death:  { n:10, spd:[15,65],  lt:[0.7,1.6],  r:[0.7,2.8], grav:55,  cols:['#888','#555','#aaa','#ccc'] },
-    heal:   { n:5,  spd:[8,25],   lt:[0.5,1.0],  r:[0.8,1.8], grav:-35, cols:['#2ecc71','#27ae60','#a8ffc8'] },
-    supply: { n:4,  spd:[12,35],  lt:[0.5,1.1],  r:[1.0,2.5], grav:0,   cols:[color,'#ffffff','#e2b96f'] },
+    combat: { n:6,  spd:[30,80],  lt:[0.35,0.65], r:[0.8,2.2], grav:20,  cols:[color,'#ff8844','#ffdd44'] },
+    death:  { n:10, spd:[12,50],  lt:[0.7,1.6],   r:[0.7,2.8], grav:35,  cols:['#888','#555','#aaa','#ccc'] },
+    heal:   { n:5,  spd:[5,18],   lt:[0.5,1.0],   r:[0.8,1.8], grav:-20, cols:['#2ecc71','#27ae60','#a8ffc8'] },
+    supply: { n:4,  spd:[8,25],   lt:[0.5,1.1],   r:[1.0,2.5], grav:0,   cols:[color,'#ffffff','#e2b96f'] },
   };
   const cfg = cfgs[type] || cfgs.combat;
-  const slots = 42 - pool.length;
-  const n = Math.min(cfg.n, slots);
+  const n   = Math.min(cfg.n, 42 - pool.length);
   for (let i = 0; i < n; i++) {
-    const ang  = Math.random() * Math.PI * 2;
-    const spd  = cfg.spd[0] + Math.random() * (cfg.spd[1] - cfg.spd[0]);
-    const life = cfg.lt[0]  + Math.random() * (cfg.lt[1]  - cfg.lt[0]);
+    const ang = Math.random() * Math.PI * 2;
+    const spd = cfg.spd[0] + Math.random() * (cfg.spd[1] - cfg.spd[0]);
+    const lt  = cfg.lt[0]  + Math.random() * (cfg.lt[1]  - cfg.lt[0]);
     pool.push({
-      x:wx, y:wy,
-      vx: Math.cos(ang) * spd,
-      vy: Math.sin(ang) * spd,
-      life: 1.0,
-      decay: 1.0 / life,
+      wx, wy,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+      life: 1.0, decay: 1.0 / lt,
       r: cfg.r[0] + Math.random() * (cfg.r[1] - cfg.r[0]),
       color: cfg.cols[Math.floor(Math.random() * cfg.cols.length)],
       gravity: cfg.grav,
@@ -105,412 +234,372 @@ function spawnParticles(pool, wx, wy, type, color) {
   }
 }
 
-// ── Paint pool (lazy init) ────────────────────────────────────────────────
-// Skia copie l'état du paint dans le PictureRecorder au moment du draw,
-// donc 4 objets réutilisés par frame = ~0 allocation Paint = GC éliminé.
-let _FP=null,_AP=null,_SP=null,_SAP=null;
-let _dashPOI=null,_dashZone=null,_dashAlliance=null,_dashMm=null;
-const _CC={};  // cache couleur : string → Skia color number
+// ── Dessin d'un cube isométrique ──────────────────────────────────────────
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H) {
+  const tw = (TILE_W / 2) * zoom;
+  const th = (TILE_H / 2) * zoom;
+  const tz = h * TILE_Z * zoom;   // hauteur de la colonne visible
 
-function _initPool(){
-  if(_FP) return;
-  _FP  = Skia.Paint();
-  _AP  = Skia.Paint();
-  _SP  = Skia.Paint(); _SP.setStyle(PaintStyle.Stroke);
-  _SAP = Skia.Paint(); _SAP.setStyle(PaintStyle.Stroke);
-  _dashPOI      = Skia.PathEffect.MakeDash([5,4]);
-  _dashZone     = Skia.PathEffect.MakeDash([7,4]);
-  _dashAlliance = Skia.PathEffect.MakeDash([4,4]);
-  _dashMm       = Skia.PathEffect.MakeDash([3,3]);
-}
-function _c(s){ return _CC[s]||(_CC[s]=Skia.Color(s)); }
+  const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, h);
+  const tx = W / 2 + (ix - camIx) * zoom;
+  const ty = H / 2 + (iy - camIy) * zoom;
 
-function mkFill(col){
-  _FP.setColor(_c(col)); _FP.setAlphaf(1); return _FP;
-}
-function mkAlpha(col,a){
-  _AP.setColor(_c(col)); _AP.setAlphaf(a); return _AP;
-}
-function mkStroke(col,w){
-  _SP.setPathEffect(null); _SP.setColor(_c(col));
-  _SP.setStrokeWidth(w);   _SP.setAlphaf(1); return _SP;
-}
-function mkStrokeA(col,w,a){
-  _SAP.setPathEffect(null); _SAP.setColor(_c(col));
-  _SAP.setStrokeWidth(w);   _SAP.setAlphaf(a); return _SAP;
-}
-function baseZoom(W,H){ return Math.min(W,H)/WORLD; }
-function clampCam(x,y,W,H,z){
-  const hw=W/z/2, hh=H/z/2;
-  return {
-    x:Math.max(hw,Math.min(WORLD-hw,x)),
-    y:Math.max(hh,Math.min(WORLD-hh,y)),
-  };
+  // Culling : hors écran ?
+  if (tx < -tw * 3 || tx > W + tw * 3 || ty < -th - tz - 16 || ty > H + th + 16) return;
+
+  const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
+  const [topC, rightC, leftC] = tileColors(biome, h);
+
+  // ── Face haut (losange) ──────────────────────────────────────────────────
+  _tp.rewind();
+  _tp.moveTo(tx,      ty - th);
+  _tp.lineTo(tx + tw, ty);
+  _tp.lineTo(tx,      ty + th);
+  _tp.lineTo(tx - tw, ty);
+  _tp.close();
+  canvas.drawPath(_tp, mkAlpha(topC, 0.92 * dimA));
+
+  // Face haut : léger reflet (eau animé ignoré ici pour perf)
+  if (zoom > 1.2 && dimA > 0.5) {
+    canvas.drawCircle(tx - tw * 0.3, ty - th * 0.4, tw * 0.22, mkAlpha('#ffffff', 0.10 * dimA));
+  }
+
+  // ── Faces latérales (uniquement si h > 0 et cube visible) ───────────────
+  if (h > 0 && tz > 0.5) {
+    // Face droite (ombre)
+    _rp.rewind();
+    _rp.moveTo(tx,      ty + th);
+    _rp.lineTo(tx + tw, ty);
+    _rp.lineTo(tx + tw, ty + tz);
+    _rp.lineTo(tx,      ty + th + tz);
+    _rp.close();
+    canvas.drawPath(_rp, mkAlpha(rightC, 0.95 * dimA));
+
+    // Face gauche (lumière)
+    _lp.rewind();
+    _lp.moveTo(tx - tw, ty);
+    _lp.lineTo(tx,      ty + th);
+    _lp.lineTo(tx,      ty + th + tz);
+    _lp.lineTo(tx - tw, ty + tz);
+    _lp.close();
+    canvas.drawPath(_lp, mkAlpha(leftC, 0.95 * dimA));
+  }
+
+  // Séparateur de tuiles (visible seulement à fort zoom)
+  if (zoom > 1.1 && dimA > 0.5) {
+    canvas.drawPath(_tp, mkStrokeA('#000000', 0.4, 0.12 * dimA));
+  }
+
+  // Brume de guerre : overlay sombre supplémentaire
+  if (fogA > 0.05) {
+    canvas.drawPath(_tp, mkAlpha('#000814', fogA * 0.72));
+  }
 }
 
-// ── Fonction de dessin principal ──────────────────────────────────────────
-function drawScene(canvas, t, v, cx, cy, z, fm, fs, W, H){
-  _initPool(); // garantit que le pool est prêt (no-op après premier appel)
-  const phase   = v.dayPhase||0;
-  const isNight = phase>=18;
-  const isDusk  = phase>=15&&phase<18;
-  const dayFrac = isNight?1:isDusk?(phase-15)/3:0;
-  const ox=W/2-cx*z, oy=H/2-cy*z, wPx=WORLD*z;
+// ── Figurine isométrique (humanoïde géométrique) ─────────────────────────
+function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm) {
+  const wz = getElev(cv.x, cv.y, hm);
+  const { ix, iy } = wToIso(cv.x, cv.y, wz);
+  const sx = W / 2 + (ix - camIx) * zoom;
+  const sy = H / 2 + (iy - camIy) * zoom;
 
-  // Fond (plus profond, navy/indigo)
-  canvas.drawColor(Skia.Color(isNight?'#02030a':'#05060f'));
+  if (sx < -50 || sx > W + 50 || sy < -100 || sy > H + 50) return;
 
-  // Terrain — couches pour profondeur SoC
-  const bc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
-  canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkFill(bc.base));
-  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.08,oy+wPx*0.08,wPx*0.84,wPx*0.84), mkAlpha(bc.mid,0.55));
-  canvas.drawRect(Skia.XYWHRect(ox+wPx*0.2,oy+wPx*0.2,wPx*0.6,wPx*0.6), mkAlpha(bc.accent,0.22));
-  // Bordure intérieure lumineuse (rim glow du biome)
-  canvas.drawRect(Skia.XYWHRect(ox+2,oy+2,wPx-4,wPx-4), mkStrokeA(bc.glow||bc.accent,2,0.20));
-  // Points de texture (grille sparse, seulement à fort zoom)
-  if(z > 1.3) {
-    const gs = 30;
-    const x0 = Math.floor((cx - W/(2*z))/gs)*gs;
-    const y0 = Math.floor((cy - H/(2*z))/gs)*gs;
-    const x1 = cx + W/(2*z) + gs;
-    const y1 = cy + H/(2*z) + gs;
-    for(let gx=x0; gx<x1; gx+=gs) {
-      for(let gy=y0; gy<y1; gy+=gs) {
-        if(gx<0||gx>WORLD||gy<0||gy>WORLD) continue;
-        const dpx=W/2+(gx-cx)*z, dpy=H/2+(gy-cy)*z;
-        canvas.drawCircle(dpx,dpy,1.1,mkAlpha(bc.accent,0.18));
+  // Figurine mort
+  if (cv.isDead) {
+    const ds = Math.max(0.5, zoom * 0.45);
+    const xp = Skia.Path.Make();
+    xp.moveTo(sx - 5*ds, sy - 2*ds); xp.lineTo(sx + 5*ds, sy + 4*ds);
+    xp.moveTo(sx + 5*ds, sy - 2*ds); xp.lineTo(sx - 5*ds, sy + 4*ds);
+    canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
+    return;
+  }
+
+  const sc   = Math.max(0.45, zoom * 0.56);
+  const baseA = cv.hasCamo ? 0.35 : 1.0;
+  const col   = cv.color;
+  const bob   = Math.sin(t * 4 + cv.idx) * 1.0 * sc;
+
+  // Glow aura (3 couches)
+  const gPulse = cv.combatFlash > 0 ? 1.5 : 1.0;
+  canvas.drawCircle(sx, sy - 10*sc, 18*sc, mkAlpha(col, 0.030 * baseA * gPulse));
+  canvas.drawCircle(sx, sy - 10*sc, 12*sc, mkAlpha(col, 0.080 * baseA * gPulse));
+  canvas.drawCircle(sx, sy - 10*sc,  7*sc, mkAlpha(col, 0.18  * baseA * gPulse));
+
+  // Flash combat
+  if (cv.combatFlash > 0) {
+    canvas.drawCircle(sx, sy - 8*sc, 15*sc, mkAlpha('#ff6644', cv.combatFlash * 0.32));
+  }
+
+  // Ombre portée (ellipse aplatie en iso)
+  const shadowP = Skia.Path.Make();
+  shadowP.addOval(Skia.XYWHRect(sx - 6*sc, sy - 1*sc, 12*sc, 4*sc));
+  canvas.drawPath(shadowP, mkAlpha('#000000', 0.30 * baseA));
+
+  // ── Jambes ──────────────────────────────────────────────────────────────
+  const legTop = sy - 2*sc;   // base des jambes (juste sous le corps)
+  const legH   = 8*sc;
+  canvas.drawRect(Skia.XYWHRect(sx - 4.5*sc, legTop + bob,  2.5*sc, legH - bob), mkAlpha(col, 0.68 * baseA));
+  canvas.drawRect(Skia.XYWHRect(sx + 2.0*sc, legTop - bob,  2.5*sc, legH + bob), mkAlpha(col, 0.68 * baseA));
+
+  // ── Corps ────────────────────────────────────────────────────────────────
+  const bodyW = 8*sc, bodyH = 12*sc;
+  const bodyX = sx - bodyW / 2, bodyY = legTop - bodyH;
+  canvas.drawRect(Skia.XYWHRect(bodyX,            bodyY,            bodyW,       bodyH),   mkAlpha(col, 0.92 * baseA));
+  canvas.drawRect(Skia.XYWHRect(bodyX + 1.2*sc,   bodyY + 1.5*sc,  bodyW*0.32,  bodyH*0.52), mkAlpha('#ffffff', 0.18 * baseA));
+
+  // ── Bras ─────────────────────────────────────────────────────────────────
+  const armY   = bodyY + 2*sc;
+  const armBob = Math.sin(t * 4 + cv.idx + Math.PI) * 1.0 * sc;
+  canvas.drawRect(Skia.XYWHRect(bodyX - 3*sc,          armY + armBob, 3*sc, 8*sc), mkAlpha(col, 0.65 * baseA));
+  canvas.drawRect(Skia.XYWHRect(bodyX + bodyW,          armY - armBob, 3*sc, 8*sc), mkAlpha(col, 0.65 * baseA));
+
+  // ── Tête ─────────────────────────────────────────────────────────────────
+  const headR = 5.5*sc;
+  const headY = bodyY - headR - 1*sc;
+  canvas.drawCircle(sx, headY, headR, mkAlpha(col, 0.95 * baseA));
+  canvas.drawCircle(sx - headR*0.30, headY - headR*0.25, headR*0.36, mkAlpha('#ffffff', 0.24 * baseA));
+
+  // Yeux (zoom élevé uniquement)
+  if (zoom > 1.8) {
+    canvas.drawCircle(sx - 1.8*sc, headY - 0.5*sc, 0.9*sc, mkAlpha('#000000', 0.72));
+    canvas.drawCircle(sx + 1.8*sc, headY - 0.5*sc, 0.9*sc, mkAlpha('#000000', 0.72));
+  }
+
+  // Ring (suivi = blanc, sinon couleur champion)
+  const isFollowed = cv.isFollowed;
+  canvas.drawCircle(sx, headY, headR + 2.2*sc,
+    mkStrokeA(isFollowed ? '#ffffff' : col,
+              isFollowed ? 2.2*sc : 1.2*sc,
+              (isFollowed ? 1.0 : 0.45) * baseA));
+
+  // ── Barre HP ──────────────────────────────────────────────────────────────
+  const bw = 22*sc, bh = 2.8*sc;
+  const bx  = sx - bw / 2;
+  const by  = headY - headR - 7*sc;
+  canvas.drawRect(Skia.XYWHRect(bx - 1, by - 1, bw + 2, bh + 2), mkAlpha('#000000', 0.72));
+  const hpRatio = Math.max(0, cv.hp / cv.maxHp);
+  const barC    = hpRatio > 0.6 ? '#2ecc71' : hpRatio > 0.3 ? '#f39c12' : '#e74c3c';
+  canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh), mkFill(barC));
+
+  // ── Nom (zoom fort) ───────────────────────────────────────────────────────
+  if (zoom > 1.6 && fm) {
+    const approxW = cv.name.length * 4.5;
+    canvas.drawText(cv.name, sx - approxW / 2, by - 4, mkAlpha('#ffffff', 0.82 * baseA), fm);
+  }
+
+  // ── Badge hauteur ─────────────────────────────────────────────────────────
+  if (cv.elevation > 3 && zoom > 0.9 && fm) {
+    canvas.drawText(`▲${cv.elevation}`, sx + headR + 2*sc, headY + 2,
+      mkAlpha('#f39c12', 0.78), fm);
+  }
+}
+
+// ── Scène isométrique principale ──────────────────────────────────────────
+function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, W, H) {
+  _initPool();
+
+  const biome = v.biome || 'forêt';
+  const hm    = v.heightMap;
+
+  // Fond (ciel nuit/jour)
+  const isNight = (v.dayPhase || 0) >= 18;
+  canvas.drawColor(Skia.Color(isNight ? '#020308' : '#040509'));
+
+  // Champion suivi → fog of war
+  const followed   = v.followId ? v.champions.find(c => c.id === v.followId && !c.isDead) : null;
+  const visionW    = followed ? (followed.visionRadius || 12) : 999;
+  const visionSoft = 10; // marge de transition (unités monde)
+
+  // ── Tiles + champions entrelacés (painter's algorithm iso) ───────────────
+  const sortedTiles = sortedTilesRef || [];
+
+  // Trier les champions par profondeur iso
+  const champsWithDepth = v.champions.map(cv => ({
+    cv,
+    depth: cv.x / HM_CELL + cv.y / HM_CELL + 0.5,  // +0.5 = toujours après le tile de même position
+  })).sort((a, b) => a.depth - b.depth);
+
+  let ci = 0;
+
+  for (let ti = 0; ti < sortedTiles.length; ti++) {
+    const tile = sortedTiles[ti];
+
+    // Insérer les champions dont la profondeur est <= profondeur de ce tile
+    while (ci < champsWithDepth.length && champsWithDepth[ci].depth <= tile.depth) {
+      drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm);
+      ci++;
+    }
+
+    // Fog of war : distance du tile au champion suivi
+    let fogA = 0;
+    if (followed) {
+      const tileWx = tile.gx * HM_CELL + HM_CELL / 2;
+      const tileWy = tile.gy * HM_CELL + HM_CELL / 2;
+      const dist   = Math.hypot(tileWx - followed.x, tileWy - followed.y);
+      fogA = dist > visionW ? Math.min(1, (dist - visionW) / visionSoft) : 0;
+    }
+
+    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H);
+  }
+
+  // Champions restants (premier plan)
+  while (ci < champsWithDepth.length) {
+    drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm);
+    ci++;
+  }
+
+  // ── Colis (supply drops) ──────────────────────────────────────────────────
+  (v.supplies || []).forEach(s => {
+    const sh  = hm ? getElev(s.x, s.y, hm) : 1;
+    const { ix, iy } = wToIso(s.x, s.y, sh + 0.6);
+    const sx2 = W / 2 + (ix - camIx) * zoom;
+    const sy2 = H / 2 + (iy - camIy) * zoom;
+    const r2  = Math.max(3, zoom * 1.6);
+    const col = SUPPLY_COLORS[s.type] || '#ffffff';
+    canvas.drawCircle(sx2, sy2, r2 * 3.2, mkAlpha(col, 0.20));
+    canvas.save();
+    canvas.translate(sx2, sy2);
+    canvas.rotate(t * 24);
+    const dp = Skia.Path.Make();
+    dp.moveTo(0,-r2); dp.lineTo(r2,0); dp.lineTo(0,r2); dp.lineTo(-r2,0); dp.close();
+    canvas.drawPath(dp, mkFill(col));
+    canvas.restore();
+  });
+
+  // ── Lignes d'alliance ─────────────────────────────────────────────────────
+  (v.alliances || []).forEach(al => {
+    const c1 = v.champions.find(c => c.id === al.ids[0]);
+    const c2 = v.champions.find(c => c.id === al.ids[1]);
+    if (!c1 || !c2 || c1.isDead || c2.isDead) return;
+    const h1 = hm ? getElev(c1.x, c1.y, hm) : 1;
+    const h2 = hm ? getElev(c2.x, c2.y, hm) : 1;
+    const { ix:ix1, iy:iy1 } = wToIso(c1.x, c1.y, h1 + 0.4);
+    const { ix:ix2, iy:iy2 } = wToIso(c2.x, c2.y, h2 + 0.4);
+    const alPath = Skia.Path.Make();
+    alPath.moveTo(W/2 + (ix1 - camIx)*zoom, H/2 + (iy1 - camIy)*zoom);
+    alPath.lineTo(W/2 + (ix2 - camIx)*zoom, H/2 + (iy2 - camIy)*zoom);
+    canvas.drawPath(alPath, mkStrokeA('#e2b96f', 1.5, 0.40));
+  });
+
+  // ── Zone mortelle ──────────────────────────────────────────────────────────
+  const zone = v.zone;
+  if (zone) {
+    const { ix:zix, iy:ziy } = wToIso(zone.cx, zone.cy, 0);
+    const zcx = W/2 + (zix - camIx) * zoom;
+    const zcy = H/2 + (ziy - camIy) * zoom;
+    // Rayon en px iso : zone.radius unités monde → TILE_W/2/HM_CELL * radius
+    const zr  = zone.radius * (TILE_W / 2 / HM_CELL) * zoom;
+    const pulse = 0.5 + Math.sin(t * 3.5) * 0.3;
+
+    const zonePath = Skia.Path.Make();
+    zonePath.addRect(Skia.XYWHRect(0, 0, W, H));
+    zonePath.addCircle(zcx, zcy, zr);
+    zonePath.setFillType(FillType.EvenOdd);
+    canvas.drawPath(zonePath, mkAlpha('#050010', 0.42));
+
+    canvas.drawCircle(zcx, zcy, zr + 14 * zoom * 0.3, mkAlpha('#ff0040', 0.04 * pulse));
+    canvas.drawCircle(zcx, zcy, zr + 7  * zoom * 0.3, mkAlpha('#ff2050', 0.08 * pulse));
+    canvas.drawCircle(zcx, zcy, zr + 3  * zoom * 0.3, mkAlpha('#ff3c3c', 0.14 * pulse));
+    canvas.drawCircle(zcx, zcy, zr, mkStrokeA('#ff3c3c', 2.5, 0.7 + pulse * 0.3));
+  }
+
+  // ── Particules ────────────────────────────────────────────────────────────
+  for (let i = 0; i < (v.particles || []).length; i++) {
+    const p  = v.particles[i];
+    const ph = hm ? getElev(p.wx, p.wy, hm) : 1;
+    const { ix:pix, iy:piy } = wToIso(p.wx, p.wy, ph + 0.5);
+    const psx = W/2 + (pix - camIx) * zoom;
+    const psy = H/2 + (piy - camIy) * zoom;
+    if (psx < -8 || psx > W+8 || psy < -8 || psy > H+8) continue;
+    canvas.drawCircle(psx, psy, Math.max(1, p.r * Math.max(0.4, zoom*0.55)), mkAlpha(p.color, p.life*0.85));
+  }
+
+  // ── HUD ───────────────────────────────────────────────────────────────────
+  if (fm) {
+    canvas.drawText(`${biome.toUpperCase()}  T${v.tick || 0}`, 8, 16, mkAlpha('#ffffff', 0.36), fm);
+    if (followed) {
+      const vLabel = `👁 ${followed.name}  ↑${followed.elevation||1}`;
+      canvas.drawText(vLabel, 8, 32, mkAlpha('#e2b96f', 0.55), fm);
+    }
+  }
+
+  // ── Minimap 2D (vue haut, en bas à gauche) ────────────────────────────────
+  const MM = 80, MMP = 8;
+  const mmx = MMP, mmy = H - MM - MMP;
+  const sc  = MM / (HM_CELLS * HM_CELL);
+
+  canvas.drawRect(Skia.XYWHRect(mmx-1, mmy-1, MM+2, MM+2), mkAlpha('#000000', 0.80));
+  if (hm) {
+    const cs = MM / HM_CELLS;
+    for (let gy = 0; gy < HM_CELLS; gy++) {
+      for (let gx = 0; gx < HM_CELLS; gx++) {
+        const h = (hm[gy] || [])[gx] ?? 1;
+        canvas.drawRect(Skia.XYWHRect(mmx + gx*cs, mmy + gy*cs, cs+0.5, cs+0.5),
+          mkAlpha(tileColors(biome, h)[0], 0.80));
       }
     }
   }
-
-  // Terrain décorations (rochers et buissons, seeded par biome)
-  const decor = genTerrainDecor(v.biome);
-  for(let i=0; i<decor.length; i++){
-    const d = decor[i];
-    const dx = W/2 + (d.x - cx)*z;
-    const dy = H/2 + (d.y - cy)*z;
-    if(dx < -20 || dx > W+20 || dy < -20 || dy > H+20) continue;
-    const dr = Math.max(1.5, d.r * Math.max(0.5, z * 0.6));
-    if(d.type === 'rock'){
-      canvas.drawCircle(dx, dy, dr,        mkAlpha(bc.accent, d.a + 0.12));
-      canvas.drawCircle(dx-dr*.3, dy-dr*.3, dr*.45, mkAlpha('#ffffff', d.a * 0.4));
-    } else {
-      canvas.drawCircle(dx,       dy,       dr*1.5, mkAlpha(bc.accent, d.a));
-      canvas.drawCircle(dx+dr*.5, dy-dr*.3, dr,     mkAlpha(bc.accent, d.a + 0.06));
-      canvas.drawCircle(dx-dr*.4, dy-dr*.2, dr*.9,  mkAlpha(bc.accent, d.a + 0.04));
-    }
+  if (zone) {
+    canvas.drawCircle(mmx + zone.cx*sc, mmy + zone.cy*sc, zone.radius*sc, mkStrokeA('#ff3c3c', 1, 0.60));
   }
-
-  // Overlay nuit
-  if(dayFrac>0){
-    canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkAlpha('#050a28',dayFrac*0.62));
+  // Cercle vision sur minimap
+  if (followed) {
+    canvas.drawCircle(mmx + followed.x*sc, mmy + followed.y*sc,
+      (followed.visionRadius || 12)*sc, mkStrokeA('#e2b96f', 0.7, 0.35));
   }
-
-  // Étoiles
-  if(isNight){
-    for(let i=0;i<STARS.length;i++){
-      const st=STARS[i];
-      const a=(0.4+Math.sin(t*1.5+st.tw)*0.35)*dayFrac;
-      if(a<=0) continue;
-      canvas.drawCircle(st.fx*W, st.fy*H, st.r, mkAlpha('#ffffff',a));
-    }
-  }
-
-  // Événements actifs
-  const ae=v.activeEvent;
-  if(ae){
-    if(ae.type==='sandstorm')
-      canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx),mkAlpha('#c3af5f',0.11+Math.sin(t*2)*0.04));
-    if(ae.type==='fog')
-      canvas.drawRect(Skia.XYWHRect(0,0,W,H),mkAlpha('#aab9c3',0.18+Math.sin(t*1.5)*0.05));
-    if(ae.type==='cold_snap')
-      canvas.drawRect(Skia.XYWHRect(0,0,W,H),mkAlpha('#8cb4dc',0.09+Math.sin(t*3)*0.03));
-    if(ae.type==='fire'){
-      const elapsed=(v.tick||0)-ae.startTick;
-      const fr=(ae.radius+elapsed*1.5)*z;
-      const fsx=W/2+(ae.x-cx)*z, fsy=H/2+(ae.y-cy)*z;
-      canvas.drawCircle(fsx,fsy,fr,   mkAlpha('#ff6400',0.38));
-      canvas.drawCircle(fsx,fsy,fr*.6,mkAlpha('#dc2800',0.28));
-      canvas.drawCircle(fsx,fsy,fr*.3,mkAlpha('#c80000',0.18));
-    }
-  }
-
-  // Bordure monde
-  canvas.drawRect(Skia.XYWHRect(ox,oy,wPx,wPx), mkStrokeA('#ffffff',2,0.10));
-
-  // POIs
-  v.pois.forEach(p=>{
-    const sx=W/2+(p.x-cx)*z, sy=H/2+(p.y-cy)*z;
-    const rpx=p.radius*z;
-    const col=POI_COLORS[p.effect]||'#888888';
-    if(p._disabled){ canvas.drawCircle(sx,sy,rpx*0.4,mkAlpha('#888888',0.3)); return; }
-    canvas.drawCircle(sx,sy,rpx,mkAlpha(col,0.12));
-    const rp=mkStrokeA(col,1.5,0.6);
-    rp.setPathEffect(_dashPOI);
-    canvas.drawCircle(sx,sy,rpx,rp);
+  v.champions.forEach(cv => {
+    const mmr = cv.isDead ? 1.0 : 2.5;
+    canvas.drawCircle(mmx + cv.x*sc, mmy + cv.y*sc, mmr, mkFill(cv.isDead ? '#333' : cv.color));
+    if (v.followId === cv.id && !cv.isDead)
+      canvas.drawCircle(mmx + cv.x*sc, mmy + cv.y*sc, mmr+1.8, mkStrokeA('#ffffff', 1, 0.9));
   });
+  canvas.drawRect(Skia.XYWHRect(mmx-1, mmy-1, MM+2, MM+2), mkStrokeA('#ffffff', 1, 0.22));
 
-  // Zone (donut + glow multi-anneaux SoC)
-  const zone=v.zone;
-  if(zone){
-    const zcx=W/2+(zone.cx-cx)*z, zcy=H/2+(zone.cy-cy)*z;
-    const rpx=zone.radius*z;
-    // Tint extérieur (zone mortelle — teinte pourpre profonde)
-    const zonePath=Skia.Path.Make();
-    zonePath.addRect(Skia.XYWHRect(0,0,W,H));
-    zonePath.addCircle(zcx,zcy,rpx);
-    zonePath.setFillType(FillType.EvenOdd);
-    canvas.drawPath(zonePath,mkAlpha('#0a0020',isNight?0.55:0.40));
-    // Glow externe progressif (3 halos)
-    const pulse=0.5+Math.sin(t*3.5)*0.3;
-    canvas.drawCircle(zcx,zcy,rpx+14*z*0.3,mkAlpha('#ff0040',0.04*pulse));
-    canvas.drawCircle(zcx,zcy,rpx+7*z*0.3, mkAlpha('#ff2050',0.08*pulse));
-    canvas.drawCircle(zcx,zcy,rpx+3*z*0.3, mkAlpha('#ff3c3c',0.14*pulse));
-    // Anneau principal animé
-    const zp=mkStroke('#ff3c3c',2.5); zp.setAlphaf(0.7+pulse*0.3); zp.setPathEffect(_dashZone);
-    canvas.drawCircle(zcx,zcy,rpx,zp);
-    // Glow intérieur (bord chaud)
-    canvas.drawCircle(zcx,zcy,rpx-4*z*0.3,mkAlpha('#ff8800',0.10*pulse));
-  }
-
-  // Lignes d'alliance
-  v.alliances.forEach(al=>{
-    const c1=v.champions.find(c=>c.id===al.ids[0]);
-    const c2=v.champions.find(c=>c.id===al.ids[1]);
-    if(!c1||!c2||c1.isDead||c2.isDead) return;
-    const alPath=Skia.Path.Make();
-    alPath.moveTo(W/2+(c1.x-cx)*z, H/2+(c1.y-cy)*z);
-    alPath.lineTo(W/2+(c2.x-cx)*z, H/2+(c2.y-cy)*z);
-    const alP=mkStrokeA('#e2b96f',1.5,0.35);
-    alP.setPathEffect(_dashAlliance);
-    canvas.drawPath(alPath,alP);
-  });
-
-  // Pièges
-  if(z>0.8){
-    v.traps.forEach(trap=>{
-      const sx=W/2+(trap.x-cx)*z, sy=H/2+(trap.y-cy)*z;
-      const sz=Math.max(4,z*2);
-      const tp=mkStrokeA('#ffcc00',1.5,0.7);
-      const xp=Skia.Path.Make();
-      xp.moveTo(sx-sz,sy-sz);xp.lineTo(sx+sz,sy+sz);
-      xp.moveTo(sx+sz,sy-sz);xp.lineTo(sx-sz,sy+sz);
-      canvas.drawPath(xp,tp);
-    });
-  }
-
-  // Colis
-  v.supplies.forEach(s=>{
-    const sx=W/2+(s.x-cx)*z, sy=H/2+(s.y-cy)*z;
-    const r=Math.max(4,z*1.8);
-    const col=SUPPLY_COLORS[s.type]||'#ffffff';
-    canvas.drawCircle(sx,sy,r*3,mkAlpha(col,0.22));
-    canvas.save();
-    canvas.translate(sx,sy);
-    canvas.rotate(t*28);
-    const dp=Skia.Path.Make();
-    dp.moveTo(0,-r);dp.lineTo(r,0);dp.lineTo(0,r);dp.lineTo(-r,0);dp.close();
-    canvas.drawPath(dp,mkFill(col));
-    canvas.restore();
-  });
-
-  // Feux de camp
-  v.champions.filter(cv=>!cv.isDead&&cv.mentalState==='campfire').forEach(cv=>{
-    const sx=W/2+(cv.x-cx)*z, sy=H/2+(cv.y-cy)*z;
-    const fr=Math.max(4,z*2.5);
-    canvas.drawCircle(sx,sy,fr*6,mkAlpha('#ff8800',0.18+Math.sin(t*2)*0.05));
-    const flick=0.8+Math.sin(t*7+cv.idx)*0.22;
-    canvas.save();
-    canvas.translate(sx,sy);
-    const fPath=Skia.Path.Make();
-    const fw=fr*0.7*flick, fh=fr*1.3*flick;
-    fPath.addOval(Skia.XYWHRect(-fw,-fh,fw*2,fh*2));
-    canvas.drawPath(fPath,mkAlpha('#ff8800',0.8));
-    canvas.restore();
-  });
-
-  // Champions
-  v.champions.forEach(cv=>{
-    const sx=W/2+(cv.x-cx)*z, sy=H/2+(cv.y-cy)*z;
-    const r=Math.max(4,z*2.5);
-
-    if(cv.isDead){
-      canvas.drawCircle(sx,sy,r,mkAlpha('#555555',0.28));
-      const xPath=Skia.Path.Make();
-      xPath.moveTo(sx-r*.6,sy-r*.6);xPath.lineTo(sx+r*.6,sy+r*.6);
-      xPath.moveTo(sx+r*.6,sy-r*.6);xPath.lineTo(sx-r*.6,sy+r*.6);
-      canvas.drawPath(xPath,mkStrokeA('#333333',r*0.4,0.28));
-      return;
-    }
-
-    const baseA=cv.hasCamo?0.30:1.0;
-
-    // ── Auras de glow (style SoC : 3 couches concentriques) ──────────────
-    if(!cv.isDead) {
-      const glowPulse = cv.combatFlash > 0 ? 1.4 : 1.0;
-      canvas.drawCircle(sx,sy,r*5.5, mkAlpha(cv.color, 0.038*baseA*glowPulse));
-      canvas.drawCircle(sx,sy,r*3.2, mkAlpha(cv.color, 0.10*baseA*glowPulse));
-      canvas.drawCircle(sx,sy,r*1.9, mkAlpha(cv.color, 0.22*baseA*glowPulse));
-    }
-
-    // Ombre portée
-    canvas.drawCircle(sx,sy+r*.60,r*.70,mkAlpha('#000000',0.32*baseA));
-
-    // Flash combat (impact lumineux)
-    if(cv.combatFlash>0) {
-      canvas.drawCircle(sx,sy,r*4, mkAlpha('#ffffff', cv.combatFlash*0.10));
-      canvas.drawCircle(sx,sy,r*2.5,mkAlpha('#ff6644',cv.combatFlash*0.45));
-    }
-
-    // Ring (rim light SoC : anneau fin très lumineux)
-    const isFollowed=v.followId===cv.id;
-    const ringCol=isFollowed?'#ffffff':cv.combatFlash>0?'#ff4444':cv.color;
-    const ringW  =isFollowed?3.2:cv.combatFlash>0?2.8:1.8;
-    const ringA  =(isFollowed||cv.combatFlash>0?1.0:0.65)*baseA;
-    canvas.drawCircle(sx,sy,r+2.8,mkStrokeA(ringCol,ringW,ringA));
-    // Inner rim (highlight petit arc intérieur)
-    if(!cv.isDead) canvas.drawCircle(sx,sy,r+0.8,mkStrokeA('#ffffff',1.0,0.18*baseA));
-
-    // Corps principal
-    canvas.drawCircle(sx,sy,r,mkAlpha(cv.color,0.92*baseA));
-
-    // Inner highlight (sphère 3D SoC : tache lumineuse haut-gauche)
-    if(!cv.isDead) {
-      canvas.drawCircle(sx-r*0.28,sy-r*0.28,r*0.42,mkAlpha('#ffffff',0.22*baseA));
-    }
-
-    // Tête (bob animé) — plus lumineuse
-    const bob=Math.sin(t*3+cv.idx)*.5;
-    canvas.drawCircle(sx,sy-r*.22+bob,r*.32,mkAlpha('#ffffff',0.62*baseA));
-    canvas.drawCircle(sx,sy-r*.22+bob,r*.24,mkAlpha(cv.color,0.88*baseA));
-
-    // Statuts
-    let seX=sx-r*1.5;
-    cv.se.forEach(seType=>{
-      const seCol=seType==='poison'?'#00ff88':seType==='bleed'?'#ff2244':'#f39c12';
-      canvas.drawCircle(seX,sy-r-5,3,mkAlpha(seCol,0.8*baseA));
-      seX+=8;
-    });
-
-    // Barre HP
-    const bw=r*3.2, bh=Math.max(3,r*.44);
-    const bx=sx-bw/2, by=sy-r-bh-3;
-    canvas.drawRect(Skia.XYWHRect(bx-1,by-1,bw+2,bh+2),mkAlpha('#000000',0.72));
-    const hp=Math.max(0,cv.hp/cv.maxHp);
-    const barC=hp>.6?'#2ecc71':hp>.3?'#f39c12':'#e74c3c';
-    canvas.drawRect(Skia.XYWHRect(bx,by,bw*hp,bh),mkFill(barC));
-
-    // Nom
-    if(z>1.05&&fm){
-      const approxW=cv.name.length*5.5;
-      canvas.drawText(cv.name, sx-approxW/2, by-3, mkAlpha('#ffffff',0.88*baseA), fm);
-    }
-
-    // Badge état mental
-    const msIcon=cv.mentalState==='berserk'?'!':cv.mentalState==='exhausted'?'~':
-                  cv.mentalState==='traumatized'?'?':'';
-    if(msIcon&&z>0.85&&fs){
-      canvas.drawText(msIcon,sx+r+1,sy-r,
-        mkAlpha(cv.mentalState==='berserk'?'#ff4444':'#f39c12',0.9),fs);
-    }
-
-    // Alliance badge
-    if(cv.inAlliance&&z>0.75&&fs){
-      canvas.drawCircle(sx-r-2,sy+r,3,mkAlpha('#e2b96f',0.8));
-    }
-  });
-
-  // ── Particules ────────────────────────────────────────────────────────────
-  if(v.particles && v.particles.length > 0) {
-    for(let i=0; i<v.particles.length; i++) {
-      const p=v.particles[i];
-      const px=W/2+(p.x-cx)*z, py=H/2+(p.y-cy)*z;
-      if(px<-8||px>W+8||py<-8||py>H+8) continue;
-      const pr=Math.max(1, p.r * Math.max(0.4, z*0.65));
-      canvas.drawCircle(px,py,pr, mkAlpha(p.color, p.life*0.85));
-    }
-  }
-
-  // HUD
-  if(fm){
-    const dayLbl=`J${Math.floor((v.tick||0)/24)+1}  ${v.biome?.toUpperCase()||''}`;
-    canvas.drawText(dayLbl,8,16,mkAlpha('#ffffff',0.38),fm);
-  }
-
-  // Minimap
-  const MM=78, MMP=8;
-  const mmx=MMP, mmy=H-MM-MMP;
-  const sc=MM/WORLD;
-  canvas.drawRect(Skia.XYWHRect(mmx-1,mmy-1,MM+2,MM+2),mkAlpha('#000000',0.75));
-  const mmbc = BIOME_COLORS[v.biome] || BIOME_COLORS['forêt'];
-  canvas.drawRect(Skia.XYWHRect(mmx,mmy,MM,MM),mkFill(mmbc.base));
-  if(dayFrac>0)
-    canvas.drawRect(Skia.XYWHRect(mmx,mmy,MM,MM),mkAlpha('#050a28',dayFrac*0.52));
-  if(zone){
-    canvas.drawCircle(mmx+zone.cx*sc,mmy+zone.cy*sc,zone.radius*sc,mkStrokeA('#ff3c3c',1,0.55));
-  }
-  v.alliances.forEach(al=>{
-    const c1=v.champions.find(c=>c.id===al.ids[0]);
-    const c2=v.champions.find(c=>c.id===al.ids[1]);
-    if(!c1||!c2||c1.isDead||c2.isDead) return;
-    const alPath=Skia.Path.Make();
-    alPath.moveTo(mmx+c1.x*sc,mmy+c1.y*sc);
-    alPath.lineTo(mmx+c2.x*sc,mmy+c2.y*sc);
-    canvas.drawPath(alPath,mkStrokeA('#e2b96f',0.7,0.3));
-  });
-  v.champions.forEach(cv=>{
-    const mmr=cv.isDead?1.0:2.2;
-    canvas.drawCircle(mmx+cv.x*sc,mmy+cv.y*sc,mmr,mkFill(cv.isDead?'#333333':cv.color));
-    if(v.followId===cv.id&&!cv.isDead)
-      canvas.drawCircle(mmx+cv.x*sc,mmy+cv.y*sc,mmr+1.5,mkStrokeA('#ffffff',1,0.9));
-  });
-  const vw=(W/z)*sc, vh=(H/z)*sc;
-  const vx=mmx+(cx-W/(2*z))*sc, vy=mmy+(cy-H/(2*z))*sc;
-  canvas.drawRect(Skia.XYWHRect(vx,vy,vw,vh),mkStrokeA('#ffffff',1,0.45));
-  canvas.drawRect(Skia.XYWHRect(mmx-1,mmy-1,MM+2,MM+2),mkStrokeA('#ffffff',1,0.22));
-
-  // ── Vignette SoC (bords obscurcis en 6 couches pour falloff doux) ────────
-  const vSteps=6;
-  for(let i=0;i<vSteps;i++){
-    const t2=i/vSteps;                          // 0=bord extrême, 1=presque centre
-    const margin=t2*Math.min(W,H)*0.40;
-    const a=0.20*(1-t2)*(1-t2);                // décroissance quadratique
-    canvas.drawRect(Skia.XYWHRect(0,0,W,margin+1),            mkAlpha('#000000',a)); // haut
-    canvas.drawRect(Skia.XYWHRect(0,H-margin-1,W,margin+1),   mkAlpha('#000000',a)); // bas
-    canvas.drawRect(Skia.XYWHRect(0,0,margin+1,H),            mkAlpha('#000000',a*0.8)); // gauche
-    canvas.drawRect(Skia.XYWHRect(W-margin-1,0,margin+1,H),   mkAlpha('#000000',a*0.8)); // droite
+  // ── Vignette (6 couches, falloff quadratique) ─────────────────────────────
+  for (let i = 0; i < 6; i++) {
+    const t2 = i / 6;
+    const mg = t2 * Math.min(W, H) * 0.40;
+    const a  = 0.20 * (1 - t2) * (1 - t2);
+    canvas.drawRect(Skia.XYWHRect(0,         0,         W,    mg+1), mkAlpha('#000000', a));
+    canvas.drawRect(Skia.XYWHRect(0,         H-mg-1,    W,    mg+1), mkAlpha('#000000', a));
+    canvas.drawRect(Skia.XYWHRect(0,         0,         mg+1, H),    mkAlpha('#000000', a*0.8));
+    canvas.drawRect(Skia.XYWHRect(W-mg-1,    0,         mg+1, H),    mkAlpha('#000000', a*0.8));
   }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
 export default function BattleMap({ battleState, onChampionTap }) {
-  const { width:W, height:H } = useWindowDimensions();
+  const { width: W, height: H } = useWindowDimensions();
 
-  // ── État caméra (refs — pas de re-render sur chaque gesture) ─────────────
-  const camX     = useRef(WORLD/2);
-  const camY     = useRef(WORLD/2);
-  const zoom      = useRef(Math.min(W,H)/WORLD);
+  // ── Caméra en espace iso ───────────────────────────────────────────────
+  const { ix: defIx, iy: defIy } = mapCenterIso();
+  const camIx     = useRef(defIx);
+  const camIy     = useRef(defIy);
+  const zoom      = useRef(0.92);
   const timeRef   = useRef(0);
   const lastTs    = useRef(null);
-  const savedCam  = useRef({x:WORLD/2,y:WORLD/2});
-  const savedZoom = useRef(1);
+  const savedCam  = useRef({ ix: defIx, iy: defIy });
+  const savedZoom = useRef(0.92);
 
-  // ── Interpolation tick (timestamp-based) ─────────────────────────────────
-  // lastTickRef = Date.now() au moment où le dernier battleState est arrivé
-  // tickDurRef  = durée estimée entre deux ticks (auto-calibré)
+  // ── Interpolation tick ────────────────────────────────────────────────
   const lastTickRef = useRef(Date.now());
-  const tickDurRef  = useRef(10000); // 10s par défaut (backend), s'ajuste seul
+  const tickDurRef  = useRef(3000);
 
-  // ── État visuel (ref mutable — sync depuis battleState) ──────────────────
+  // ── Tiles pré-triés (recalculé quand heightmap change) ────────────────
+  const sortedTilesRef = useRef([]);
+
+  // ── État visuel ───────────────────────────────────────────────────────
   const gvisRef = useRef({
-    champions:[], zone:{cx:150,cy:150,radius:185},
-    alliances:[], activeEvent:null, dayPhase:0, tick:0,
-    traps:[], supplies:[], pois:[], biome:'forêt', followId:null,
-    particles:[], pendingSpawns:[],
+    champions: [], zone: { cx:50, cy:50, radius:55 },
+    alliances: [], dayPhase: 0, tick: 0,
+    supplies: [], biome: 'forêt', followId: null,
+    particles: [], pendingSpawns: [],
+    heightMap: null,
   });
 
-  // ── Caméra POV : état du champion suivi ─────────────────────────────────
-  const [followInfo, setFollowInfo] = useState(null); // {id, name, color} | null
+  // ── Suivi champion ────────────────────────────────────────────────────
+  const [followInfo, setFollowInfo] = useState(null);
 
   const cycleFollow = useCallback((dir) => {
     const alive = (gvisRef.current.champions || []).filter(cv => !cv.isDead);
@@ -528,245 +617,256 @@ export default function BattleMap({ battleState, onChampionTap }) {
     setFollowInfo(null);
   }, []);
 
-  // ── Polices (lazy — Skia.Font(null) crash iOS en v2.x) ───────────────────
+  // ── Polices Skia ─────────────────────────────────────────────────────
   const fontSmRef  = useRef(null);
   const fontMidRef = useRef(null);
-  useEffect(()=>{
-    try { fontSmRef.current  = Skia.Font(undefined,9);  } catch(e){}
-    try { fontMidRef.current = Skia.Font(undefined,11); } catch(e){}
-  },[]);
+  useEffect(() => {
+    try { fontSmRef.current  = Skia.Font(undefined, 9);  } catch(e){}
+    try { fontMidRef.current = Skia.Font(undefined, 11); } catch(e){}
+  }, []);
 
-  // ── Skia Picture (mis à jour chaque frame via RAF) ────────────────────────
+  // ── RAF Loop ──────────────────────────────────────────────────────────
   const [picture, setPicture] = useState(null);
   const rafRef = useRef(null);
 
-  useEffect(()=>{
-    const animate=(ts)=>{
-      const delta = lastTs.current!==null ? ts-lastTs.current : 16;
-      lastTs.current=ts;
-      timeRef.current=ts/1000;
-      const z=zoom.current;
+  useEffect(() => {
+    const animate = (ts) => {
+      const delta = lastTs.current !== null ? ts - lastTs.current : 16;
+      lastTs.current = ts;
+      timeRef.current = ts / 1000;
 
-      // Follow mode
-      const fId=gvisRef.current.followId;
-      if(fId){
-        const fc=gvisRef.current.champions.find(cv=>cv.id===fId&&!cv.isDead);
-        if(fc){
-          const nx=camX.current+(fc.x-camX.current)*0.09;
-          const ny=camY.current+(fc.y-camY.current)*0.09;
-          const c=clampCam(nx,ny,W,H,z);
-          camX.current=c.x; camY.current=c.y;
+      // Follow mode : caméra suit le champion en espace iso
+      const fId = gvisRef.current.followId;
+      if (fId) {
+        const fc = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
+        if (fc) {
+          const hm = gvisRef.current.heightMap;
+          const wz = hm ? getElev(fc.x, fc.y, hm) : 1;
+          const { ix: tix, iy: tiy } = wToIso(fc.x, fc.y, wz);
+          camIx.current += (tix - camIx.current) * 0.09;
+          camIy.current += (tiy - camIy.current) * 0.09;
         }
       }
 
-      // ── Spawn + update particules ─────────────────────────────────────────
-      if(gvisRef.current.pendingSpawns.length > 0) {
+      // Spawn particules en attente
+      if (gvisRef.current.pendingSpawns.length > 0) {
         gvisRef.current.pendingSpawns.forEach(s => {
-          spawnParticles(gvisRef.current.particles, s.x, s.y, s.type, s.color);
+          spawnParticles(gvisRef.current.particles, s.wx, s.wy, s.type, s.color);
         });
         gvisRef.current.pendingSpawns = [];
       }
-      const dtSec = delta/1000;
+
+      // Mise à jour particules
+      const dtSec = delta / 1000;
       gvisRef.current.particles = gvisRef.current.particles.filter(p => {
-        p.x += p.vx * dtSec; p.y += p.vy * dtSec;
-        p.vy += (p.gravity||0) * dtSec;
+        p.wx += p.vx * dtSec;
+        p.wy += p.vy * dtSec;
+        p.vy += (p.gravity || 0) * dtSec;
         p.life -= p.decay * dtSec;
         return p.life > 0;
       });
 
-      // Interpolation linéaire basée sur le temps réel depuis le dernier tick
-      // alpha=0 au tick, alpha=1 au tick suivant → mouvement continu sur toute la durée
-      const now    = Date.now();
-      const elapsed= now - lastTickRef.current;
-      const tickDur= Math.max(500, tickDurRef.current);
-      const alpha  = Math.min(1, elapsed / tickDur);
-
-      gvisRef.current.champions.forEach(cv=>{
+      // Interpolation linéaire des champions (timestamp-based)
+      const now     = Date.now();
+      const elapsed = now - lastTickRef.current;
+      const alpha   = Math.min(1, elapsed / Math.max(500, tickDurRef.current));
+      gvisRef.current.champions.forEach(cv => {
         cv.x = cv.prevX + (cv.tx - cv.prevX) * alpha;
         cv.y = cv.prevY + (cv.ty - cv.prevY) * alpha;
-        if(cv.combatFlash>0) cv.combatFlash=Math.max(0,cv.combatFlash-delta/1000);
+        if (cv.combatFlash > 0) cv.combatFlash = Math.max(0, cv.combatFlash - dtSec);
       });
 
-      // Enregistrement Skia
-      const recorder=Skia.PictureRecorder();
-      const canvas=recorder.beginRecording(Skia.XYWHRect(0,0,W,H));
-      drawScene(
-        canvas, timeRef.current, gvisRef.current,
-        camX.current, camY.current, z,
+      // Rendu Skia
+      const rec = Skia.PictureRecorder();
+      const cvs = rec.beginRecording(Skia.XYWHRect(0, 0, W, H));
+      drawIsoScene(
+        cvs, timeRef.current, gvisRef.current,
+        sortedTilesRef.current,
+        camIx.current, camIy.current, zoom.current,
         fontMidRef.current, fontSmRef.current, W, H
       );
-      setPicture(recorder.finishRecordingAsPicture());
-
-      rafRef.current=requestAnimationFrame(animate);
+      setPicture(rec.finishRecordingAsPicture());
+      rafRef.current = requestAnimationFrame(animate);
     };
-    rafRef.current=requestAnimationFrame(animate);
-    return ()=>{ if(rafRef.current) cancelAnimationFrame(rafRef.current); };
-  },[W,H]);
+    rafRef.current = requestAnimationFrame(animate);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [W, H]);
 
-  // ── Sync depuis battleState ───────────────────────────────────────────────
-  useEffect(()=>{
-    if(!battleState) return;
+  // ── Sync depuis battleState ───────────────────────────────────────────
+  useEffect(() => {
+    if (!battleState) return;
 
-    // Auto-calibration de la durée du tick (mesure la vraie cadence)
+    // Auto-calibration tick
     const now = Date.now();
     const gap = now - lastTickRef.current;
-    if(gap > 300 && gap < 60000) {
-      // Moyenne pondérée pour lisser les variations
+    if (gap > 300 && gap < 60000) {
       tickDurRef.current = tickDurRef.current * 0.3 + gap * 0.7;
     }
     lastTickRef.current = now;
 
-    // Mise à l'échelle : backend = 100×100, simulateur = 300×300
-    const mapW   = battleState.map?.width  || 100;
-    const mapH   = battleState.map?.height || 100;
-    const scaleX = WORLD / mapW;
-    const scaleY = WORLD / mapH;
+    const biome = battleState.map?.biome || 'forêt';
+    const hm    = battleState.map?.heightMap
+      || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
-    const prevMap=new Map((gvisRef.current.champions||[]).map(cv=>[cv.id,cv]));
-    const champs=(battleState.champions||[]).map((c,i)=>{
-      const ex=prevMap.get(c.id);
-      const tx=c.x*scaleX, ty=c.y*scaleY;
-      // prevX/prevY = position courante au moment où le tick arrive (point de départ du lerp)
+    // Pre-compute sorted tiles (une seule fois par heightmap)
+    const prevHm = gvisRef.current.heightMap;
+    if (hm !== prevHm) {
+      const tiles = [];
+      for (let gy = 0; gy < HM_CELLS; gy++) {
+        for (let gx = 0; gx < HM_CELLS; gx++) {
+          const h = (hm[gy] || [])[gx] ?? 1;
+          tiles.push({ gx, gy, h, depth: gx + gy + h * 0.001 });
+        }
+      }
+      tiles.sort((a, b) => a.depth - b.depth);
+      sortedTilesRef.current = tiles;
+    }
+
+    const prevMap = new Map((gvisRef.current.champions || []).map(cv => [cv.id, cv]));
+    const champs  = (battleState.champions || []).map((c, i) => {
+      const ex  = prevMap.get(c.id);
+      const tx  = c.x, ty = c.y;   // backend 0-100, pas de rescale
       return {
-        id:c.id,
-        x:ex?ex.x:tx, y:ex?ex.y:ty,
-        prevX:ex?ex.x:tx, prevY:ex?ex.y:ty,
+        id: c.id,
+        x: ex ? ex.x : tx, y: ex ? ex.y : ty,
+        prevX: ex ? ex.x : tx, prevY: ex ? ex.y : ty,
         tx, ty,
-        hp:c.hp, maxHp:c.maxHp,
-        color:c.color||CHAMP_COLORS[i%CHAMP_COLORS.length],
-        isDead:c.hp<=0,
-        combatFlash:ex?ex.combatFlash:0,
-        name:c.name, idx:i,
-        mentalState:c._mentalState||'normal',
-        hasCamo:(c.buffs||[]).some(b=>b.special==='camo'),
-        se:(c.statusEffects||[]).map(s=>s.type),
-        inAlliance:(battleState.alliances||[]).some(al=>al.ids.includes(c.id)),
+        hp: c.hp, maxHp: c.maxHp,
+        color: c.color || CHAMP_COLORS[i % CHAMP_COLORS.length],
+        isDead: c.hp <= 0,
+        combatFlash: ex ? ex.combatFlash : 0,
+        name: c.name, idx: i,
+        hasCamo: (c.buffs || []).some(b => b.stat === 'camouflage' && b.ticks > 0),
+        se: (c.statusEffects || []).map(s => s.type),
+        inAlliance: (battleState.alliances || []).some(al => al.ids.includes(c.id)),
+        elevation: c.elevation || 1,
+        visionRadius: c.visionRadius || 12,
+        isFollowed: gvisRef.current.followId === c.id,
       };
     });
-    // Flash combat + spawns particules
+
+    // Spawns particules
     const spawns = [];
-    const prevMap2 = new Map((gvisRef.current.champions||[]).map(cv=>[cv.id,cv]));
     champs.forEach(cv => {
-      const ex2 = prevMap2.get(cv.id);
-      if(ex2 && !ex2.isDead && cv.isDead) {
-        // Mort : burst de cendres
-        spawns.push({ x:cv.tx, y:cv.ty, type:'death', color:cv.color });
-      }
+      const ex2 = prevMap.get(cv.id);
+      if (ex2 && !ex2.isDead && cv.isDead)
+        spawns.push({ wx: cv.tx, wy: cv.ty, type: 'death', color: cv.color });
     });
-    (battleState.events||[]).slice(-20).forEach(ev=>{
-      if(ev.type==='combat')[ev.a,ev.b].forEach(id=>{
-        const cv=champs.find(c=>c.id===id);
-        if(cv){ cv.combatFlash=0.75; spawns.push({x:cv.tx,y:cv.ty,type:'combat',color:cv.color}); }
+    (battleState.events || []).slice(-20).forEach(ev => {
+      if (ev.type === 'combat') [ev.a, ev.b].forEach(id => {
+        const cv = champs.find(c => c.id === id);
+        if (cv) { cv.combatFlash = 0.75; spawns.push({ wx: cv.tx, wy: cv.ty, type: 'combat', color: cv.color }); }
       });
-      if(ev.type==='collect'){
-        const cv=champs.find(c=>c.id===ev.champion);
-        if(cv) spawns.push({x:cv.tx,y:cv.ty,type:'heal',color:cv.color});
+      if (ev.type === 'collect') {
+        const cv = champs.find(c => c.id === ev.champion);
+        if (cv) spawns.push({ wx: cv.tx, wy: cv.ty, type: 'heal', color: cv.color });
       }
     });
-    gvisRef.current.pendingSpawns = spawns;
 
-    // Zone → mise à l'échelle
     const rawZone = battleState.map?.zone;
-    const zone = rawZone
-      ? { cx: rawZone.cx*scaleX, cy: rawZone.cy*scaleY, radius: rawZone.radius*scaleX }
-      : { cx: WORLD/2, cy: WORLD/2, radius: 185 };
+    const zone    = rawZone || { cx:50, cy:50, radius:55 };
 
-    gvisRef.current={
-      champions:champs,
+    gvisRef.current = {
+      champions:     champs,
       zone,
-      alliances:battleState.alliances||[],
-      activeEvent:battleState.activeEvent||null,
-      dayPhase: battleState.dayPhase||0,
-      tick:     battleState.tick||0,
-      traps:   (battleState.map?.traps   ||[]).map(t=>({...t,x:t.x*scaleX,y:t.y*scaleY})),
-      supplies:(battleState.map?.supplies||[]).map(s=>({...s,x:s.x*scaleX,y:s.y*scaleY})),
-      pois:    (battleState.map?.pois    ||[]).map(p=>({...p,x:p.x*scaleX,y:p.y*scaleY})),
-      biome:    battleState.map?.biome||'forêt',
-      followId: gvisRef.current.followId,
-      particles: gvisRef.current.particles || [],
+      alliances:     battleState.alliances || [],
+      dayPhase:      battleState.dayPhase  || 0,
+      tick:          battleState.tick      || 0,
+      supplies:      battleState.map?.supplies || [],
+      biome,
+      heightMap:     hm,
+      followId:      gvisRef.current.followId,
+      particles:     gvisRef.current.particles || [],
       pendingSpawns: spawns,
     };
-  },[battleState]);
+  }, [battleState]);
 
-  // ── Tap handler (JS thread) ───────────────────────────────────────────────
-  const handleTap=useCallback((ex,ey)=>{
-    const v=gvisRef.current;
-    const cx2=camX.current, cy2=camY.current, z2=zoom.current;
-    for(const cv of v.champions){
-      if(cv.isDead) continue;
-      const sx=W/2+(cv.x-cx2)*z2, sy=H/2+(cv.y-cy2)*z2;
-      if(Math.hypot(ex-sx,ey-sy)<Math.max(12,z2*3.5)){
-        const wasFollowing=gvisRef.current.followId===cv.id;
-        gvisRef.current.followId=wasFollowing?null:cv.id;
-        setFollowInfo(wasFollowing?null:{id:cv.id,name:cv.name,color:cv.color});
-        if(onChampionTap) onChampionTap(cv.id);
+  // ── Tap handler ───────────────────────────────────────────────────────
+  const handleTap = useCallback((ex, ey) => {
+    const v  = gvisRef.current;
+    const hm = v.heightMap;
+
+    for (const cv of v.champions) {
+      if (cv.isDead) continue;
+      const wz  = hm ? getElev(cv.x, cv.y, hm) : 1;
+      const { ix, iy } = wToIso(cv.x, cv.y, wz);
+      const sx2 = W/2 + (ix - camIx.current) * zoom.current;
+      const sy2 = H/2 + (iy - camIy.current) * zoom.current;
+      if (Math.hypot(ex - sx2, ey - sy2) < Math.max(14, zoom.current * 9)) {
+        const was = v.followId === cv.id;
+        gvisRef.current.followId = was ? null : cv.id;
+        setFollowInfo(was ? null : { id: cv.id, name: cv.name, color: cv.color });
+        if (onChampionTap) onChampionTap(cv.id);
         return;
       }
     }
-    const MM=78,MMP=8,mmy=H-MM-MMP;
-    if(ex>=MMP&&ex<=MMP+MM&&ey>=mmy&&ey<=mmy+MM){
-      const sc=MM/WORLD;
-      camX.current=(ex-MMP)/sc; camY.current=(ey-mmy)/sc;
+
+    // Tap minimap → déplace caméra iso
+    const MM = 80, MMP = 8, mmy = H - MM - MMP;
+    if (ex >= MMP && ex <= MMP+MM && ey >= mmy && ey <= mmy+MM) {
+      const sc = MM / (HM_CELLS * HM_CELL);
+      const wx = (ex - MMP) / sc;
+      const wy = (ey - mmy) / sc;
+      const wz = hm ? getElev(wx, wy, hm) : 1;
+      const { ix, iy } = wToIso(wx, wy, wz);
+      camIx.current = ix; camIy.current = iy;
       return;
     }
-    gvisRef.current.followId=null;
+
+    gvisRef.current.followId = null;
     setFollowInfo(null);
-  },[W,H,onChampionTap]);
+  }, [W, H, onChampionTap]);
 
-  // ── Gestes (JS thread — runOnJS(true)) ───────────────────────────────────
-  const panGesture=Gesture.Pan()
-    .onStart(()=>{ savedCam.current={x:camX.current,y:camY.current}; })
-    .onUpdate(e=>{
-      const c=clampCam(
-        savedCam.current.x-e.translationX/zoom.current,
-        savedCam.current.y-e.translationY/zoom.current,
-        W,H,zoom.current
-      );
-      camX.current=c.x; camY.current=c.y;
-      if(gvisRef.current.followId){ gvisRef.current.followId=null; setFollowInfo(null); }
+  // ── Gestes ───────────────────────────────────────────────────────────
+  const panGesture = Gesture.Pan()
+    .onStart(() => { savedCam.current = { ix: camIx.current, iy: camIy.current }; })
+    .onUpdate(e => {
+      camIx.current = savedCam.current.ix - e.translationX / zoom.current;
+      camIy.current = savedCam.current.iy - e.translationY / zoom.current;
+      if (gvisRef.current.followId) { gvisRef.current.followId = null; setFollowInfo(null); }
     })
     .runOnJS(true);
 
-  const pinchGesture=Gesture.Pinch()
-    .onStart(()=>{ savedZoom.current=zoom.current; })
-    .onUpdate(e=>{
-      const bz=baseZoom(W,H);
-      const wx=camX.current+(e.focalX-W/2)/zoom.current;
-      const wy=camY.current+(e.focalY-H/2)/zoom.current;
-      const nz=Math.max(bz*0.98,Math.min(9,savedZoom.current*e.scale));
-      zoom.current=nz;
-      const c=clampCam(wx-(e.focalX-W/2)/nz,wy-(e.focalY-H/2)/nz,W,H,nz);
-      camX.current=c.x; camY.current=c.y;
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => { savedZoom.current = zoom.current; })
+    .onUpdate(e => {
+      const nz  = Math.max(0.5, Math.min(6, savedZoom.current * e.scale));
+      const dix = (e.focalX - W/2) / zoom.current;
+      const diy = (e.focalY - H/2) / zoom.current;
+      zoom.current = nz;
+      camIx.current += dix - (e.focalX - W/2) / nz;
+      camIy.current += diy - (e.focalY - H/2) / nz;
     })
     .runOnJS(true);
 
-  const doubleTap=Gesture.Tap().numberOfTaps(2)
-    .onEnd(()=>{
-      zoom.current=baseZoom(W,H);
-      camX.current=WORLD/2; camY.current=WORLD/2;
-      gvisRef.current.followId=null;
+  const doubleTap = Gesture.Tap().numberOfTaps(2)
+    .onEnd(() => {
+      const { ix, iy } = mapCenterIso();
+      camIx.current = ix; camIy.current = iy;
+      zoom.current = 0.92;
+      gvisRef.current.followId = null;
       setFollowInfo(null);
     })
     .runOnJS(true);
 
-  const singleTap=Gesture.Tap()
-    .onEnd(e=>{ handleTap(e.x,e.y); })
+  const singleTap = Gesture.Tap()
+    .onEnd(e => { handleTap(e.x, e.y); })
     .runOnJS(true);
 
-  const gesture=Gesture.Simultaneous(
+  const gesture = Gesture.Simultaneous(
     panGesture, pinchGesture,
-    Gesture.Exclusive(doubleTap,singleTap)
+    Gesture.Exclusive(doubleTap, singleTap)
   );
 
   return (
     <View style={StyleSheet.absoluteFill}>
       <GestureDetector gesture={gesture}>
         <Canvas style={StyleSheet.absoluteFill}>
-          {picture && <Picture picture={picture}/>}
+          {picture && <Picture picture={picture} />}
         </Canvas>
       </GestureDetector>
 
-      {/* Barre caméra POV ← → */}
+      {/* Barre POV ← champion suivi → */}
       <View style={styles.povBar} pointerEvents="box-none">
         <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(-1)} activeOpacity={0.75}>
           <Text style={styles.povBtnTxt}>◀</Text>
@@ -801,7 +901,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: 'rgba(226,185,111,0.45)',
   },
-  povBtnTxt: { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
+  povBtnTxt:   { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
   povCenter: {
     flex: 1, maxWidth: 170,
     backgroundColor: 'rgba(0,0,0,0.60)',

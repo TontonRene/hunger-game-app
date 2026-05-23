@@ -317,7 +317,7 @@ export default function ChampionSprite({
   return (
     <View style={[styles.container, { height }, style]}>
       <WebView
-        style={styles.webview}
+        style={[styles.webview, { backgroundColor: '#0d0d1a' }]}
         source={{ html }}
         originWhitelist={['*']}
         javaScriptEnabled
@@ -325,6 +325,7 @@ export default function ChampionSprite({
         androidHardwareAccelerationDisabled={false}
         mixedContentMode="always"
         cacheEnabled={false}
+        backgroundColor="#0d0d1a"
       />
       {showTag && (
         <View style={styles.tag}>
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: '#0d0d1a',
   },
-  webview: { flex: 1, backgroundColor: 'transparent' },
+  webview: { flex: 1, backgroundColor: '#0d0d1a' },
   tag: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,

@@ -932,7 +932,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     }
 
     // Halo coloré
-    canvas.drawCircle(sx2, sy2, r2 * 3.0, mkAlpha(col, 0.18));
+    canvas.drawCircle(sx2, sy2, r2 * 1.4, mkAlpha(col, 0.22));
 
     // ── Sprite distinct par type ─────────────────────────────────────────────
     canvas.save();
@@ -1270,7 +1270,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const gpulse = 0.82 + Math.sin(t * 2.2 + idSeed * 0.1) * 0.18;
 
     // Halo de distance (aide à repérer la ressource)
-    canvas.drawCircle(flsx + sway, flsy, fr2 * 3.8, mkAlpha(cfg.bright, 0.12 * gpulse));
+    canvas.drawCircle(flsx + sway, flsy, fr2 * 2.0, mkAlpha(cfg.bright, 0.14 * gpulse));
 
     // Ombre portée
     canvas.drawCircle(flsx + sway + 1, flsy + fr2 * 0.9, fr2 * 1.4, mkAlpha('#000000', 0.28));

@@ -1104,7 +1104,7 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
   }
   // Cuir manquant pour armure
   if (safeToCraft && needsHide > 0 && nearFauna.length > 0) {
-    const deadAnimal = (state.map.fauna||[]).find(f=>f.hp<=0&&dist(f,c)<240);
+    const deadAnimal = (fauna||[]).find(f=>f.hp<=0&&dist(f,c)<240);
     if (deadAnimal) scores.gather_hide += 5 + needsHide * 2;
   }
 

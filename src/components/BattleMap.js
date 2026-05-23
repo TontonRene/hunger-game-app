@@ -114,6 +114,25 @@ function tileColors(biome, h) {
   return pal[idx];
 }
 
+// ── Index tile depuis le spritesheet (grille 11×11 de tiles 32×32) ────────
+// Rangées observées : 0-1=terre, 2-3=herbe, 4=plantes, 5=rochers bruns,
+// 6=cailloux gris, 7=glace/neige, 8=eau claire, 9=eau sombre, 10=eau/glace
+const TILE_IDX = {
+  'forêt':    { lo:[22,32], hi:[33,43] },
+  'jungle':   { lo:[33,43], hi:[44,54] },
+  'marais':   { lo:[0, 10], hi:[55,65] },
+  'montagne': { lo:[55,65], hi:[66,76] },
+  'toundra':  { lo:[66,76], hi:[77,87] },
+  'désert':   { lo:[11,21], hi:[11,21] },
+  'volcan':   { lo:[55,65], hi:[55,65] },
+};
+function getTileIdx(biome, h, gx, gy) {
+  if (h === 0) return 99 + Math.abs(gx * 7 + gy * 13) % 10;  // eau sombre
+  const rng = (TILE_IDX[biome] || TILE_IDX['forêt']);
+  const r   = h >= 3 ? rng.hi : rng.lo;
+  return r[0] + Math.abs(gx * 7 + gy * 13) % (r[1] - r[0] + 1);
+}
+
 // ── Génération procédurale de rivières sur la heightmap ───────────────────
 function addRivers(hm, biome, rng) {
   const nb = biome === 'marais' ? 3 : biome === 'forêt' ? 2 : biome === 'montagne' ? 2 : biome === 'jungle' ? 4 : 1;
@@ -305,7 +324,7 @@ function _tileRng(gx, gy, idx) {
 }
 
 // ── Dessin d'un cube isométrique — rendu riche ────────────────────────────
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t) {
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, tileImg) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
   const tz = h * TILE_Z * zoom;
@@ -335,7 +354,22 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   _tp.close();
   canvas.drawPath(_tp, mkAlpha(topC, dimA));
 
-  // ── Texture de surface (uniquement si visible) ────────────────────────────
+  // ── Texture tileset sur la face supérieure ────────────────────────────────
+  if (tileImg && zoom > 0.55 && dimA > 0.18) {
+    const tIdx = getTileIdx(biome, h, gx, gy);
+    const tCol = tIdx % 11, tRow = Math.floor(tIdx / 11);
+    canvas.save();
+    canvas.clipPath(_tp);
+    canvas.drawImageRect(
+      tileImg,
+      Skia.XYWHRect(tCol * 32, tRow * 32, 32, 32),
+      Skia.XYWHRect(tx - tw, ty - th, tw * 2, th * 2),
+      _getSpriteP(0.80 * dimA)
+    );
+    canvas.restore();
+  }
+
+  // ── Texture de surface biome (uniquement si visible) ──────────────────────
   if (zoom > 0.9 && dimA > 0.25 && h > 0) {
     // Détails biome-spécifiques (seulement à zoom suffisant — pas de points génériques)
     if (zoom > 1.4) {
@@ -619,7 +653,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const frameW   = animImg.width() / animFrames;
     const frameH   = animImg.height() / 4;             // sprite sheet 4 lignes (directions)
     const dirRow   = cv.dirRow ?? 0;                   // 0=bas 1=gauche 2=droite 3=haut
-    const spH      = Math.max(16, zoom * (TILE_H / 2) * 2.8);  // taille pour frame 1:1
+    const spH      = Math.max(20, zoom * (TILE_H / 2) * 3.6);  // taille pour frame 1:1 (plus grands)
     const spW      = spH;                              // frame 64×64 → ratio 1:1
     const spX      = sx - spW / 2;
     const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;
@@ -771,7 +805,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       fogA = dist > visionW ? Math.min(0.62, (dist - visionW) / visionSoft) : 0;
     }
 
-    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t);
+    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t, spriteImgs?.tileset);
   }
 
   // Champions restants (premier plan)
@@ -1089,165 +1123,57 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     canvas.drawCircle(fsx, fsy, fGlow * 0.3, mkAlpha('#ffcc44', 0.30 * fPulse));
   }
 
-  // ── Faune — sprites distincts par espèce ─────────────────────────────────
+  // ── Faune — sprites animés (4 directions × N frames) ────────────────────
+  // hunt pack (deer/boar/hare) : frameSize=32 | wolf (critters) : frameSize=64
+  const FAUNA_ANIM = {
+    deer:   { idle:'animalDeerIdle', run:'animalDeerRun',   sz:32 },
+    boar:   { idle:'animalBoarIdle', run:'animalBoarRun',   sz:32, attack:'animalBoarAtk' },
+    rabbit: { idle:'animalHareIdle', run:'animalHareRun',   sz:32 },
+    wolf:   { idle:'animalWolfIdle', run:'animalWolfRun',   sz:64, attack:'animalWolfBite' },
+  };
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
     const fh  = hm ? getElev(f.x, f.y, hm) : 1;
     const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.3);
     const fsx = W/2 + (fix - camIx) * zoom;
     const fsy = H/2 + (fiy - camIy) * zoom;
-    if (fsx < -40 || fsx > W+40 || fsy < -40 || fsy > H+40) return;
+    if (fsx < -60 || fsx > W+60 || fsy < -60 || fsy > H+60) return;
 
-    const fr   = Math.max(1.2, zoom * 0.55);  // faune 2× plus petite
-    const idN  = f.id ? (f.id.charCodeAt(f.id.length-1) || f.id.charCodeAt(0) || 0) : 0;
-    const bob  = Math.sin(t * 2.8 + idN * 0.7) * 1.8;
+    const spec    = FAUNA_ANIM[f.type];
+    const dirRow  = f.dirRow ?? 0;
+    const isMov   = !!(f.isMoving);
 
-    // Ombre au sol (commune)
-    canvas.drawCircle(fsx + 1.2, fsy + bob + fr * 0.9, fr * 1.3, mkAlpha('#000000', 0.20));
-
-    if (f.type === 'deer') {
-      // ── Cerf : svelte, tawny, ramure ──────────────────────────────────
-      const dk='#6a4010', dc='#d4a84b', lt='#f0c870';
-      // Corps (2 lobes)
-      canvas.drawCircle(fsx-fr*0.45, fsy+bob,       fr*1.28, mkAlpha(dk,0.92));
-      canvas.drawCircle(fsx-fr*0.45, fsy+bob,       fr*1.05, mkAlpha(dc,0.95));
-      canvas.drawCircle(fsx+fr*0.4,  fsy+bob-fr*.1, fr*1.12, mkAlpha(dk,0.92));
-      canvas.drawCircle(fsx+fr*0.4,  fsy+bob-fr*.1, fr*0.90, mkAlpha(dc,0.95));
-      canvas.drawCircle(fsx,         fsy+bob+fr*.2,  fr*0.45, mkAlpha(lt,0.50)); // ventre
-      // Cou
-      canvas.drawCircle(fsx+fr*0.9,  fsy+bob-fr*.6, fr*0.55, mkAlpha(dk,0.90));
-      canvas.drawCircle(fsx+fr*0.9,  fsy+bob-fr*.6, fr*0.40, mkAlpha(dc,0.95));
-      // Tête
-      const hx=fsx+fr*1.5, hy=fsy+bob-fr*1.2;
-      canvas.drawCircle(hx,       hy,        fr*0.76, mkAlpha(dk,0.92));
-      canvas.drawCircle(hx,       hy,        fr*0.58, mkAlpha(dc,0.98));
-      canvas.drawCircle(hx+fr*.3, hy+fr*.18, fr*0.36, mkAlpha(dk,0.85)); // museau
-      canvas.drawCircle(hx+fr*.3, hy+fr*.18, fr*0.24, mkAlpha('#c09040',0.92));
-      canvas.drawCircle(hx+fr*.15, hy-fr*.1,  fr*0.16, mkAlpha('#000',0.90)); // œil
-      canvas.drawCircle(hx+fr*.13, hy-fr*.12, fr*0.07, mkAlpha('#fff',0.65));
-      // Oreille
-      canvas.drawCircle(hx-fr*.12, hy-fr*.5, fr*0.28, mkAlpha(dk,0.88));
-      canvas.drawCircle(hx-fr*.12, hy-fr*.5, fr*0.17, mkAlpha('#d0886a',0.80));
-      // Ramure — 2 branches en Y
-      const ap=Skia.Path.Make(), ax=hx-fr*.05, ay=hy-fr*.62;
-      ap.moveTo(ax-fr*.18,ay); ap.lineTo(ax-fr*.58,ay-fr*.95);
-      ap.moveTo(ax-fr*.52,ay-fr*.65); ap.lineTo(ax-fr*.95,ay-fr*.45);
-      ap.moveTo(ax+fr*.18,ay); ap.lineTo(ax+fr*.5,ay-fr*.88);
-      ap.moveTo(ax+fr*.44,ay-fr*.58); ap.lineTo(ax+fr*.82,ay-fr*.32);
-      canvas.drawPath(ap, mkStrokeA(dk, Math.max(0.8,fr*0.20), 0.92));
-      // Pattes (4 points)
-      const ly=fsy+bob+fr*1.52;
-      [-0.65,-0.22,0.22,0.65].forEach(lx=>canvas.drawCircle(fsx+fr*lx,ly,fr*0.17,mkAlpha(dk,0.78)));
-
-    } else if (f.type === 'rabbit') {
-      // ── Lapin : petit, rond, grandes oreilles ─────────────────────────
-      const rk='#806848', rc='#ece8c0', rl='#f8f4e0', rp='#f0a0a0';
-      const rs=fr*0.68; // plus petit
-      // Corps (très rond)
-      canvas.drawCircle(fsx,      fsy+bob,       rs*1.18, mkAlpha(rk,0.88));
-      canvas.drawCircle(fsx,      fsy+bob,       rs,      mkAlpha(rc,0.96));
-      canvas.drawCircle(fsx+rs*.1,fsy+bob+rs*.2, rs*0.55, mkAlpha(rl,0.55)); // ventre
-      // Tête
-      const rhx=fsx+rs*.82, rhy=fsy+bob-rs*.52;
-      canvas.drawCircle(rhx, rhy, rs*0.76, mkAlpha(rk,0.88));
-      canvas.drawCircle(rhx, rhy, rs*0.60, mkAlpha(rc,0.96));
-      // Oreilles (colonnes de cercles)
-      const e1x=fsx+rs*.35, e2x=fsx+rs*.85;
-      [-1.1,-0.65,-0.2].forEach(yo => {
-        const ey=fsy+bob-rs*1.55+rs*yo*0;
-        canvas.drawCircle(e1x, fsy+bob-rs*(1.5-yo*0.45), rs*0.26, mkAlpha(rk,0.85));
-        canvas.drawCircle(e1x, fsy+bob-rs*(1.5-yo*0.45), rs*0.17, mkAlpha(rc,0.96));
-        canvas.drawCircle(e2x, fsy+bob-rs*(1.5-yo*0.45), rs*0.26, mkAlpha(rk,0.85));
-        canvas.drawCircle(e2x, fsy+bob-rs*(1.5-yo*0.45), rs*0.17, mkAlpha(rc,0.96));
-      });
-      canvas.drawCircle(e1x, fsy+bob-rs*2.2, rs*0.12, mkAlpha(rp,0.72)); // intérieur rose
-      canvas.drawCircle(e2x, fsy+bob-rs*2.2, rs*0.12, mkAlpha(rp,0.72));
-      // Museau + nez rose
-      canvas.drawCircle(rhx+rs*.6, rhy+rs*.05, rs*0.20, mkAlpha(rk,0.78));
-      canvas.drawCircle(rhx+rs*.6, rhy+rs*.05, rs*0.10, mkAlpha(rp,0.90));
-      // Œil
-      canvas.drawCircle(rhx+rs*.12, rhy-rs*.15, rs*0.15, mkAlpha('#000',0.90));
-      canvas.drawCircle(rhx+rs*.10, rhy-rs*.17, rs*0.06, mkAlpha('#fff',0.65));
-      // Queue (derrière)
-      canvas.drawCircle(fsx-rs*.88, fsy+bob-rs*.18, rs*0.26, mkAlpha(rk,0.68));
-      canvas.drawCircle(fsx-rs*.88, fsy+bob-rs*.18, rs*0.17, mkAlpha(rl,0.90));
-
-    } else if (f.type === 'wolf') {
-      // ── Loup : élancé, sombre, yeux ambrés ────────────────────────────
-      const wk='#283030', wc='#7a8c8a', wl='#a8c0b8';
-      // Corps allongé (3 cercles)
-      canvas.drawCircle(fsx-fr*.9,  fsy+bob+fr*.1,  fr*1.12, mkAlpha(wk,0.90));
-      canvas.drawCircle(fsx-fr*.9,  fsy+bob+fr*.1,  fr*0.90, mkAlpha(wc,0.95));
-      canvas.drawCircle(fsx,        fsy+bob-fr*.05, fr*0.98, mkAlpha(wk,0.90));
-      canvas.drawCircle(fsx,        fsy+bob-fr*.05, fr*0.78, mkAlpha(wc,0.95));
-      canvas.drawCircle(fsx+fr*.8,  fsy+bob-fr*.1,  fr*0.88, mkAlpha(wk,0.90));
-      canvas.drawCircle(fsx+fr*.8,  fsy+bob-fr*.1,  fr*0.70, mkAlpha(wc,0.95));
-      canvas.drawCircle(fsx-fr*.1,  fsy+bob+fr*.28, fr*0.50, mkAlpha(wl,0.30)); // ventre
-      // Queue (relevée)
-      canvas.drawCircle(fsx-fr*1.75,fsy+bob-fr*.45, fr*0.52, mkAlpha(wk,0.86));
-      canvas.drawCircle(fsx-fr*1.75,fsy+bob-fr*.45, fr*0.36, mkAlpha(wc,0.92));
-      canvas.drawCircle(fsx-fr*1.92,fsy+bob-fr*.88, fr*0.32, mkAlpha(wk,0.78));
-      canvas.drawCircle(fsx-fr*1.92,fsy+bob-fr*.88, fr*0.20, mkAlpha('#ccd8d0',0.88));
-      // Tête
-      const hwx=fsx+fr*1.52, hwy=fsy+bob-fr*.78;
-      canvas.drawCircle(hwx,        hwy,        fr*0.80, mkAlpha(wk,0.90));
-      canvas.drawCircle(hwx,        hwy,        fr*0.63, mkAlpha(wc,0.96));
-      // Museau long
-      canvas.drawCircle(hwx+fr*.58, hwy+fr*.22, fr*0.48, mkAlpha(wk,0.88));
-      canvas.drawCircle(hwx+fr*.58, hwy+fr*.22, fr*0.34, mkAlpha('#6a8070',0.92));
-      canvas.drawCircle(hwx+fr*.98, hwy+fr*.26, fr*0.15, mkAlpha('#181818',0.95)); // nez
-      // Oreilles pointues
-      canvas.drawCircle(hwx-fr*.28, hwy-fr*.78, fr*0.33, mkAlpha(wk,0.92));
-      canvas.drawCircle(hwx-fr*.28, hwy-fr*.78, fr*0.17, mkAlpha('#c87070',0.72));
-      canvas.drawCircle(hwx+fr*.14, hwy-fr*.82, fr*0.28, mkAlpha(wk,0.88));
-      canvas.drawCircle(hwx+fr*.14, hwy-fr*.82, fr*0.13, mkAlpha('#c87070',0.68));
-      // Œil ambre
-      canvas.drawCircle(hwx+fr*.22, hwy-fr*.14, fr*0.19, mkAlpha('#000',0.85));
-      canvas.drawCircle(hwx+fr*.22, hwy-fr*.14, fr*0.12, mkAlpha('#d8a820',0.90));
-      canvas.drawCircle(hwx+fr*.24, hwy-fr*.16, fr*0.05, mkAlpha('#000',0.95));
-      // Pattes
-      const wly=fsy+bob+fr*1.28;
-      [-0.75,-0.28,0.18,0.62].forEach(lx=>canvas.drawCircle(fsx+fr*lx,wly,fr*0.16,mkAlpha(wk,0.75)));
-
-    } else if (f.type === 'boar') {
-      // ── Sanglier : trapu, sombre, défenses ivoire ─────────────────────
-      const bk='#2a1008', bc='#6a4020', bl='#8a5838', iv='#f0e8c0';
-      // Corps large et bas
-      canvas.drawCircle(fsx-fr*.28, fsy+bob+fr*.18, fr*1.52, mkAlpha(bk,0.92));
-      canvas.drawCircle(fsx-fr*.28, fsy+bob+fr*.18, fr*1.25, mkAlpha(bc,0.96));
-      canvas.drawCircle(fsx-fr*.28, fsy+bob-fr*.28, fr*0.75, mkAlpha('#1a0804',0.32)); // soies dos
-      // Tête massive
-      const bhx=fsx+fr*1.08, bhy=fsy+bob-fr*.2;
-      canvas.drawCircle(bhx,        bhy,        fr*1.08, mkAlpha(bk,0.92));
-      canvas.drawCircle(bhx,        bhy,        fr*0.88, mkAlpha(bc,0.96));
-      canvas.drawCircle(bhx,        bhy,        fr*0.58, mkAlpha(bl,0.38)); // reflet
-      // Groin
-      canvas.drawCircle(bhx+fr*.78, bhy+fr*.28, fr*0.52, mkAlpha(bk,0.90));
-      canvas.drawCircle(bhx+fr*.78, bhy+fr*.28, fr*0.38, mkAlpha('#5a3018',0.95));
-      canvas.drawCircle(bhx+fr*1.16,bhy+fr*.16, fr*0.13, mkAlpha('#180808',0.90)); // naseaux
-      canvas.drawCircle(bhx+fr*1.16,bhy+fr*.34, fr*0.12, mkAlpha('#180808',0.90));
-      // Défenses ivoire
-      canvas.drawCircle(bhx+fr*.88, bhy+fr*.68, fr*0.24, mkAlpha(iv,0.92));
-      canvas.drawCircle(bhx+fr*1.08,bhy+fr*.70, fr*0.19, mkAlpha(iv,0.92));
-      // Œil rouge-sombre
-      canvas.drawCircle(bhx+fr*.28, bhy-fr*.24, fr*0.17, mkAlpha('#180000',0.95));
-      canvas.drawCircle(bhx+fr*.26, bhy-fr*.26, fr*0.07, mkAlpha('#c03000',0.78));
-      // Petites oreilles
-      canvas.drawCircle(bhx-fr*.22, bhy-fr*.82, fr*0.28, mkAlpha(bk,0.88));
-      canvas.drawCircle(bhx-fr*.22, bhy-fr*.82, fr*0.15, mkAlpha('#8a3828',0.78));
-      // Pattes courtes
-      const bly=fsy+bob+fr*1.75;
-      [-0.58,-0.18,0.22,0.62].forEach(lx=>canvas.drawCircle(fsx+fr*lx,bly,fr*0.21,mkAlpha(bk,0.82)));
+    // ── Sprite animé (ou fallback géométrique si sprite pas encore chargé) ──
+    const spHF  = Math.max(10, zoom * (TILE_H / 2) * 1.9);  // ~taille faune
+    if (spec && spriteImgs[spec.idle]) {
+      const imgKey  = isMov ? (spec.run || spec.idle) : spec.idle;
+      const img     = spriteImgs[imgKey] || spriteImgs[spec.idle];
+      const sz      = spec.sz;
+      const frames  = Math.max(1, Math.floor(img.width() / sz));
+      const fps     = isMov ? 8 : 4;
+      const frameIdx = Math.floor(t * fps) % frames;
+      canvas.drawImageRect(
+        img,
+        Skia.XYWHRect(frameIdx * sz, dirRow * sz, sz, sz),
+        Skia.XYWHRect(fsx - spHF/2, fsy - spHF, spHF, spHF),
+        _getSpriteP(0.94)
+      );
+    } else {
+      // Fallback coloré (si sprite pas encore chargé)
+      const fr = Math.max(1.2, zoom * 0.55);
+      const fc = f.type==='wolf'?'#4a6060':f.type==='boar'?'#5a3018':f.type==='deer'?'#d4a84b':'#ece8c0';
+      canvas.drawCircle(fsx, fsy - fr, fr * 1.8, mkAlpha(fc, 0.90));
     }
 
     // HP bar si blessé
     if (f.hp != null && f.maxHp != null && f.hp < f.maxHp && zoom > 1.2) {
-      const barW=fr*5.5, barH=Math.max(2,zoom*1.2), bx=fsx-barW/2, by=fsy+bob-fr*3.4;
+      const barW=spHF*0.9, barH=Math.max(2,zoom*1.2), bx=fsx-barW/2, by=fsy-spHF-3;
       canvas.drawRect(Skia.XYWHRect(bx-0.5,by-0.5,barW+1,barH+1), mkAlpha('#000000',0.70));
       canvas.drawRect(Skia.XYWHRect(bx,by,barW,barH), mkAlpha('#330000',0.80));
       canvas.drawRect(Skia.XYWHRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),barH), mkFill('#ff3030'));
     }
   });
+
 
   // ── Flore (ressources bien visibles sur la carte) ─────────────────────────
   const FLORA_CFG = {
@@ -1508,6 +1434,19 @@ export default function BattleMap({ battleState, onChampionTap }) {
   const imgRun    = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Run_with_shadow.png'));
   const imgAttack = useImage(require('../../assets/sprites/PNG/Sword/With_shadow/Sword_attack_with_shadow.png'));
   const imgDeath  = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Death_with_shadow.png'));
+  // ── Animaux (faune) ────────────────────────────────────────────────────────
+  const imgDeerIdle  = useImage(require('../../assets/sprites/animals/deer_idle.png'));
+  const imgDeerRun   = useImage(require('../../assets/sprites/animals/deer_run.png'));
+  const imgBoarIdle  = useImage(require('../../assets/sprites/animals/boar_idle.png'));
+  const imgBoarRun   = useImage(require('../../assets/sprites/animals/boar_run.png'));
+  const imgBoarAtk   = useImage(require('../../assets/sprites/animals/boar_attack.png'));
+  const imgHareIdle  = useImage(require('../../assets/sprites/animals/hare_idle.png'));
+  const imgHareRun   = useImage(require('../../assets/sprites/animals/hare_run.png'));
+  const imgWolfIdle  = useImage(require('../../assets/sprites/animals/wolf_idle.png'));
+  const imgWolfRun   = useImage(require('../../assets/sprites/animals/wolf_run.png'));
+  const imgWolfBite  = useImage(require('../../assets/sprites/animals/wolf_bite.png'));
+  // ── Tileset isométrique ───────────────────────────────────────────────────
+  const imgTileset   = useImage(require('../../assets/sprites/tiles/tileset.png'));
 
   const spriteImgsRef = useRef({});
 
@@ -1544,12 +1483,28 @@ export default function BattleMap({ battleState, onChampionTap }) {
   // Mise à jour si useImage charge (meilleure qualité / rendu natif)
   useEffect(() => {
     const cur = spriteImgsRef.current;
-    if (imgIdle)   cur.idle   = imgIdle;
-    if (imgWalk)   cur.walk   = imgWalk;
-    if (imgRun)    cur.run    = imgRun;
-    if (imgAttack) cur.attack = imgAttack;
-    if (imgDeath)  cur.death  = imgDeath;
-  }, [imgIdle, imgWalk, imgRun, imgAttack, imgDeath]);
+    if (imgIdle)     cur.idle         = imgIdle;
+    if (imgWalk)     cur.walk         = imgWalk;
+    if (imgRun)      cur.run          = imgRun;
+    if (imgAttack)   cur.attack       = imgAttack;
+    if (imgDeath)    cur.death        = imgDeath;
+    // Animaux
+    if (imgDeerIdle) cur.animalDeerIdle = imgDeerIdle;
+    if (imgDeerRun)  cur.animalDeerRun  = imgDeerRun;
+    if (imgBoarIdle) cur.animalBoarIdle = imgBoarIdle;
+    if (imgBoarRun)  cur.animalBoarRun  = imgBoarRun;
+    if (imgBoarAtk)  cur.animalBoarAtk  = imgBoarAtk;
+    if (imgHareIdle) cur.animalHareIdle = imgHareIdle;
+    if (imgHareRun)  cur.animalHareRun  = imgHareRun;
+    if (imgWolfIdle) cur.animalWolfIdle = imgWolfIdle;
+    if (imgWolfRun)  cur.animalWolfRun  = imgWolfRun;
+    if (imgWolfBite) cur.animalWolfBite = imgWolfBite;
+    // Tileset
+    if (imgTileset)  cur.tileset        = imgTileset;
+  }, [imgIdle, imgWalk, imgRun, imgAttack, imgDeath,
+      imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
+      imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
+      imgTileset]);
 
   // ── Caméra en espace iso ───────────────────────────────────────────────
   const { ix: defIx, iy: defIy } = mapCenterIso();
@@ -1804,7 +1759,22 @@ export default function BattleMap({ battleState, onChampionTap }) {
       followId:      gvisRef.current.followId,
       particles:     gvisRef.current.particles || [],
       pendingSpawns: spawns,
-      fauna:         (battleState.map?.fauna || []).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
+      fauna:         (() => {
+        const prevFM = new Map((gvisRef.current.fauna || []).map(pf => [pf.id, pf]));
+        return (battleState.map?.fauna || []).map(f => {
+          const pf   = prevFM.get(f.id);
+          const fx   = f.x * sX, fy = f.y * sY;
+          const fdx  = pf ? fx - pf.x : 0, fdy = pf ? fy - pf.y : 0;
+          const fmov = Math.hypot(fdx, fdy);
+          let fDir   = pf ? (pf.dirRow ?? 0) : 0;
+          if (fmov > 0.05) {
+            const adx = Math.abs(fdx), ady = Math.abs(fdy);
+            if (adx >= ady) fDir = fdx >= 0 ? 2 : 1;
+            else            fDir = fdy >= 0 ? 0 : 3;
+          }
+          return { ...f, x: fx, y: fy, dirRow: fDir, isMoving: fmov > 0.05 };
+        });
+      })(),
       flora:         (battleState.map?.flora || []).filter(f => !f.collected).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
       obstacles:     (battleState.map?.obstacles || []).map(o => ({ ...o, x: o.x * sX, y: o.y * sY, radius: (o.radius || 5) * sX })),
       activeEvent:   battleState.activeEvent || null,

@@ -561,7 +561,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
 
   if (sx < -50 || sx > W + 50 || sy < -100 || sy > H + 50) return;
 
-  const sc    = Math.max(0.45, zoom * 0.56);
+  const sc    = Math.max(0.9, zoom * 1.2);
   const baseA = cv.hasCamo ? 0.35 : 1.0;
   const col   = cv.color;
 
@@ -1116,7 +1116,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const fsy = H/2 + (fiy - camIy) * zoom;
     if (fsx < -40 || fsx > W+40 || fsy < -40 || fsy > H+40) return;
 
-    const fr   = Math.max(4.5, zoom * 2.4);
+    const fr   = Math.max(2.2, zoom * 1.2);
     const idN  = f.id ? (f.id.charCodeAt(f.id.length-1) || f.id.charCodeAt(0) || 0) : 0;
     const bob  = Math.sin(t * 2.8 + idN * 0.7) * 1.8;
 
@@ -1516,7 +1516,6 @@ function DebugOverlay({ SH, canvasHRef, zoom, spriteImgsRef }) {
 
 // ═════════════════════════════════════════════════════════════════════════
 export default function BattleMap({ battleState, onChampionTap }) {
-  console.log('🗺️ BattleMap v2 — nouveau code chargé');
   const { width: W, height: SH } = useWindowDimensions();
   // Hauteur réelle du canvas (≠ SH qui est la hauteur écran)
   const canvasHRef = useRef(SH);
@@ -1874,8 +1873,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   const pinchGesture = Gesture.Pinch()
     .onStart(() => {
-      savedZoom.current = zoom.current;
-      savedCam.current  = { ix: camIx.current, iy: camIy.current };
+      savedZoom.current      = zoom.current;
+      targetZoom.current     = zoom.current;  // stoppe le lerp pendant le geste
+      savedCam.current       = { ix: camIx.current, iy: camIy.current };
     })
     .onUpdate(e => {
       const prevZoom = zoom.current;

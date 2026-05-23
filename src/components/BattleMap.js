@@ -337,17 +337,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
 
   // ── Texture de surface (uniquement si visible) ────────────────────────────
   if (zoom > 0.9 && dimA > 0.25 && h > 0) {
-    // Patch sombre (creux / ombre)
-    const dkX = tx + (r0 - 0.5) * tw * 0.7;
-    const dkY = ty + (r1 - 0.5) * th * 0.7;
-    canvas.drawCircle(dkX, dkY, tw * (0.18 + r2 * 0.12), mkAlpha('#000000', 0.14 * dimA));
-
-    // Patch clair (relief / surbrillance)
-    const ltX = tx + (r3 - 0.65) * tw * 0.55;
-    const ltY = ty + (r4 - 0.65) * th * 0.55;
-    canvas.drawCircle(ltX, ltY, tw * 0.14, mkAlpha('#ffffff', 0.16 * dimA));
-
-    // Détails biome-spécifiques (seulement à zoom suffisant)
+    // Détails biome-spécifiques (seulement à zoom suffisant — pas de points génériques)
     if (zoom > 1.4) {
       if (biome === 'forêt') {
         // Deux touffes d'herbe
@@ -561,7 +551,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
 
   if (sx < -50 || sx > W + 50 || sy < -100 || sy > H + 50) return;
 
-  const sc    = Math.max(0.9, zoom * 1.2);
+  const sc    = Math.max(0.8, zoom * 0.75);  // échelle UI (barres, ombres, anneaux)
   const baseA = cv.hasCamo ? 0.35 : 1.0;
   const col   = cv.color;
 
@@ -587,7 +577,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const deathImg = spriteImgs?.death || spriteImgs?.idle;
     if (deathImg) {
       const deathFrames = spriteImgs?.death ? (SPRITES.death?.frames || 7) : 12;
-      const spH    = 34 * sc;
+      const spH    = Math.max(20, zoom * 38);
       const frameW = deathImg.width() / deathFrames;
       const frameH = deathImg.height();
       const spW    = spH * (frameW / frameH);
@@ -628,7 +618,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const frameIdx = Math.floor(t * animFps) % animFrames;
     const frameW   = animImg.width() / animFrames;
     const frameH   = animImg.height();
-    const spH      = 40*sc;
+    const spH      = Math.max(22, zoom * 42);  // sprites bien proportionnels aux tiles
     const spW      = spH * (frameW / frameH);
     const spX      = sx - spW / 2;
     const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;
@@ -688,26 +678,17 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     canvas.drawCircle(sx, sy - 14*sc, 5*sc, mkAlpha('#27ae60', 0.25 + Math.sin(t*3)*0.08));
   }
 
-  // ── Barres HP + survie ────────────────────────────────────────────────────
-  const bw = 24*sc, bh = 2.8*sc;
+  // ── Barre HP uniquement (faim/soif masquées sur la carte) ───────────────
+  const bw = 26*sc, bh = 3.2*sc;
   const bx = sx - bw / 2;
-  const by = (topY !== undefined ? topY : headY - headR) - (cv.hunger!=null ? 13*sc : 8*sc);
+  const by = (topY !== undefined ? topY : headY - headR) - 8*sc;
 
-  canvas.drawRect(Skia.XYWHRect(bx-1, by-1, bw+2, bh+2), mkAlpha('#000000', 0.75));
+  canvas.drawRect(Skia.XYWHRect(bx-1, by-1, bw+2, bh+2), mkAlpha('#000000', 0.80));
   const hpRatio = Math.max(0, cv.hp / cv.maxHp);
   const barC    = hpRatio > 0.6 ? '#2ecc71' : hpRatio > 0.3 ? '#f39c12' : '#e74c3c';
   canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh), mkFill(barC));
   // Reflet HP bar
-  canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh*0.45), mkAlpha('#ffffff', 0.18));
-
-  if (cv.hunger != null) {
-    const by2 = by + bh + 1.4*sc;
-    const by3 = by2 + bh + 1.0*sc;
-    canvas.drawRect(Skia.XYWHRect(bx-1,by2-1,bw+2,bh+2), mkAlpha('#000000', 0.62));
-    canvas.drawRect(Skia.XYWHRect(bx,by2,bw*Math.max(0,cv.hunger/100),bh), mkAlpha('#e67e22',0.88));
-    canvas.drawRect(Skia.XYWHRect(bx-1,by3-1,bw+2,bh+2), mkAlpha('#000000', 0.62));
-    canvas.drawRect(Skia.XYWHRect(bx,by3,bw*Math.max(0,cv.thirst/100),bh), mkAlpha('#3498db',0.88));
-  }
+  canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh*0.45), mkAlpha('#ffffff', 0.20));
 
   // ── Nom (zoom fort) ───────────────────────────────────────────────────────
   if (zoom > 1.6 && fm) {
@@ -896,10 +877,10 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   const allDrops = [...(v.supplies || []), ...(v.loots || [])];
   allDrops.forEach(s => {
     const sh   = hm ? getElev(s.x, s.y, hm) : 1;
-    // Animation de chute étendue (20 ticks, départ haut dans le ciel)
+    // Animation de chute étendue (35 ticks, départ haut dans le ciel — descente douce)
     const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
-    const falling  = tickDiff < 20;
-    const fallH    = falling ? Math.max(0, sh + 20 - tickDiff * 1.0) : sh + 0.6;
+    const falling  = tickDiff < 35;
+    const fallH    = falling ? Math.max(0, sh + 28 - tickDiff * 0.8) : sh + 0.6;
     const { ix, iy } = wToIso(s.x, s.y, fallH);
     const sx2 = W / 2 + (ix - camIx) * zoom;
     const sy2 = H / 2 + (iy - camIy) * zoom;
@@ -912,14 +893,14 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       const { ix:six2, iy:siy2 } = wToIso(s.x, s.y, sh + 0.3);
       const shdx = W/2 + (six2 - camIx) * zoom;
       const shdy = H/2 + (siy2 - camIy) * zoom;
-      const fallProgress = tickDiff / 20;
+      const fallProgress = tickDiff / 35;
       const shadowA = (1 - fallProgress) * 0.25;
       canvas.drawCircle(shdx, shdy, r2 * (1 + (1 - fallProgress) * 3.0), mkAlpha('#000000', shadowA));
     }
 
     // ── Parachute (pendant la chute) ────────────────────────────────────────
     if (falling && fallH > sh + 0.8) {
-      const pdR  = r2 * 3.2 * (1 - tickDiff / 22);  // se referme à l'atterrissage
+      const pdR  = r2 * 3.2 * (1 - tickDiff / 37);  // se referme à l'atterrissage
       const pdx  = sx2;
       const pdy  = sy2 - pdR * 1.6;
       // Dôme (demi-ellipse via cubic bezier)
@@ -959,7 +940,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
     if (s.type === 'sword') {
       // Épée : lame effilée + garde + poignée
-      canvas.rotate(t * 15);
+      canvas.rotate(-35);
       const blade = Skia.Path.Make();
       blade.moveTo(0, -r2*3.5); blade.lineTo(r2*0.5, -r2*0.6); blade.lineTo(-r2*0.5, -r2*0.6); blade.close();
       canvas.drawPath(blade, mkAlpha('#d8d8e8', 0.92));
@@ -968,14 +949,14 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*0.5, r2*0.56, r2*1.25), mkAlpha('#8a6020', 0.92)); // poignée
     } else if (s.type === 'spear') {
       // Lance : hampe longue + fer de lance
-      canvas.rotate(t * 12 + 40);
+      canvas.rotate(-55);
       canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*3.6, r2*0.56, r2*3.8), mkAlpha('#8a6030', 0.90));
       const tip = Skia.Path.Make();
       tip.moveTo(0, -r2*5.0); tip.lineTo(r2*0.65, -r2*3.6); tip.lineTo(-r2*0.65, -r2*3.6); tip.close();
       canvas.drawPath(tip, mkAlpha('#c8d0d8', 0.94));
     } else if (s.type === 'bow') {
       // Arc : courbe + corde
-      canvas.rotate(t * 10 + 25);
+      canvas.rotate(25);
       const arc = Skia.Path.Make();
       arc.moveTo(-r2*0.9, -r2*2.4);
       arc.cubicTo(-r2*3.0, -r2*1.0, -r2*3.0, r2*1.0, -r2*0.9, r2*2.4);
@@ -994,20 +975,20 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawPath(shP, mkStrokeA('#c8a840', Math.max(1, zoom*0.75), 0.82));
       canvas.drawCircle(0, 0, r2*0.58, mkAlpha('#c8a840', 0.78));
     } else if (s.type === 'soin') {
-      // Croix médicale verte
-      canvas.rotate(t * 18);
+      // Croix médicale verte (statique)
+      canvas.rotate(0);
       canvas.drawRect(Skia.XYWHRect(-r2*2.0, -r2*0.68, r2*4.0, r2*1.36), mkAlpha('#27ae60', 0.94));
       canvas.drawRect(Skia.XYWHRect(-r2*0.68, -r2*2.0, r2*1.36, r2*4.0), mkAlpha('#27ae60', 0.94));
       canvas.drawRect(Skia.XYWHRect(-r2*1.8, -r2*0.45, r2*3.6, r2*0.90), mkAlpha('#ffffff', 0.28));
     } else if (s.type === 'force') {
       // Haltère rouge
-      canvas.rotate(t * 20 + 90);
+      canvas.rotate(90);
       canvas.drawCircle(-r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
       canvas.drawCircle( r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
       canvas.drawRect(Skia.XYWHRect(-r2*1.6, -r2*0.42, r2*3.2, r2*0.84), mkAlpha('#c0392b', 0.90));
     } else if (s.type === 'vitesse') {
       // Éclair jaune
-      canvas.rotate(t * 22);
+      canvas.rotate(-15);
       const bolt = Skia.Path.Make();
       bolt.moveTo( r2*0.65, -r2*2.3); bolt.lineTo(-r2*0.42, -r2*0.2); bolt.lineTo( r2*0.85, -r2*0.2);
       bolt.lineTo(-r2*0.65,  r2*2.3); bolt.lineTo( r2*0.42,  r2*0.4); bolt.lineTo(-r2*0.85,  r2*0.4);
@@ -1049,7 +1030,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawCircle(0, 0, r2*0.55, mkAlpha('#6ab04c', 0.80));
     } else if (s.type === 'carte') {
       // Carte dépliée
-      canvas.rotate(t * 14);
+      canvas.rotate(-10);
       canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkAlpha('#f9ca24', 0.92));
       canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkStrokeA('#8a7010', Math.max(0.8, zoom*0.5), 0.80));
       for (let li = 0; li < 3; li++) {
@@ -1057,8 +1038,8 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
         canvas.drawRect(Skia.XYWHRect(-r2*1.2, ly, r2*2.4, r2*0.38), mkAlpha('#8a7010', 0.38));
       }
     } else {
-      // Fallback générique : diamant tournant
-      canvas.rotate(t * 20);
+      // Fallback générique : diamant incliné
+      canvas.rotate(45);
       const dp = Skia.Path.Make();
       dp.moveTo(0, -r2); dp.lineTo(r2, 0); dp.lineTo(0, r2); dp.lineTo(-r2, 0); dp.close();
       canvas.drawPath(dp, mkFill(col));
@@ -1116,7 +1097,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const fsy = H/2 + (fiy - camIy) * zoom;
     if (fsx < -40 || fsx > W+40 || fsy < -40 || fsy > H+40) return;
 
-    const fr   = Math.max(2.2, zoom * 1.2);
+    const fr   = Math.max(1.2, zoom * 0.55);  // faune 2× plus petite
     const idN  = f.id ? (f.id.charCodeAt(f.id.length-1) || f.id.charCodeAt(0) || 0) : 0;
     const bob  = Math.sin(t * 2.8 + idN * 0.7) * 1.8;
 

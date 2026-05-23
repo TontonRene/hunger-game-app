@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, useImage, BlendMode,
+  PaintStyle, useImage, BlendMode, ClipOp,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -358,7 +358,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     const tIdx = getTileIdx(biome, h, gx, gy);
     const tCol = tIdx % 11, tRow = Math.floor(tIdx / 11);
     canvas.save();
-    canvas.clipPath(_tp);
+    canvas.clipPath(_tp, ClipOp.Intersect, true);
     canvas.drawImageRect(
       tileImg,
       Skia.XYWHRect(tCol * 32, tRow * 32, 32, 32),

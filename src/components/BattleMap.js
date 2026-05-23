@@ -1884,7 +1884,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
       // delta cam = focalIso_avant - focalIso_après
       //           = (focalScreen - center) / prevZoom - (focalScreen - center) / newZoom
       const fx = e.focalX - W / 2;
-      const fy = e.focalY - H / 2;
+      const fy = e.focalY - (canvasHRef.current > 80 ? canvasHRef.current : SH) / 2;
       camIx.current += fx / prevZoom - fx / nz;
       camIy.current += fy / prevZoom - fy / nz;
       zoom.current        = nz;

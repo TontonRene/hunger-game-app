@@ -7,10 +7,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, useImage,
+  PaintStyle, useImage, BlendMode,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { SPRITES } from '../utils/sprites';
 
 // ── Constantes isométriques ───────────────────────────────────────────────
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
@@ -550,6 +549,37 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   }
 }
 
+// ── Look déterministe par champion ───────────────────────────────────────
+function _hashId(id) {
+  let h = 0; const s = String(id || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#ff6b9d','#00b894','#fd79a8','#6c5ce7','#e84393'];
+const _PANTS_COLS = ['#2c3e50','#4a235a','#1a5276','#145a32','#6e2f0a','#17202a','#7f8c8d','#5d4037'];
+const _HAIR_COLS  = ['#1a0800','#3d1c02','#d4a017','#c05000','#505050','#f0e0c0','#800000','#000000'];
+const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0'];
+function generateLook(id) {
+  const h = _hashId(id);
+  return {
+    skinTint:  _SKIN_COLS[h          % _SKIN_COLS.length],
+    hairTint:  _HAIR_COLS[(h >> 3)   % _HAIR_COLS.length],
+    shirtTint: _SHIRT_COLS[(h >> 6)  % _SHIRT_COLS.length],
+    pantsTint: _PANTS_COLS[(h >> 9)  % _PANTS_COLS.length],
+  };
+}
+// Cache de paints tintés (ColorFilter.MakeBlend Multiply)
+const _tintCache = {};
+function _getTintPaint(hexColor, alpha) {
+  if (!_tintCache[hexColor]) {
+    const p = Skia.Paint();
+    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(hexColor), BlendMode.Multiply));
+    _tintCache[hexColor] = p;
+  }
+  _tintCache[hexColor].setAlphaf(alpha);
+  return _tintCache[hexColor];
+}
+
 // ── Figurine géométrique améliorée (fallback si pas de sprite) ────────────
 function _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col) {
   const bob   = Math.sin(t * 4 + cv.idx) * 1.0 * sc;
@@ -607,22 +637,21 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
 
   // ── Figure morte ──────────────────────────────────────────────────────────
   if (cv.isDead) {
-    // Utilise le vrai sprite death (dernier frame) ou fallback idle
-    const deathImg = spriteImgs?.death || spriteImgs?.idle;
-    if (deathImg) {
-      const deathFrames = spriteImgs?.death ? (SPRITES.death?.frames || 7) : 12;
-      const spH    = Math.max(12, zoom * (TILE_H / 2) * 2.0);
-      const frameW = deathImg.width() / deathFrames;
-      const frameH = deathImg.height() / 4;            // 4 lignes, prend la ligne 0 (bas/face)
-      const spW    = spH;                              // ratio 1:1
-      // Affiche le dernier frame (position allongé) — ligne 0 = face caméra
-      const lastFrame = deathFrames - 1;
-      canvas.drawImageRect(
-        deathImg,
-        Skia.XYWHRect(lastFrame * frameW, 0, frameW, frameH),
-        Skia.XYWHRect(sx - spW / 2, sy - spH, spW, spH),
-        _getSpriteP(0.30 * baseA)
-      );
+    const charSheet = spriteImgs?.charSheet;
+    const spH = Math.max(14, zoom * (TILE_H / 2) * 2.2);
+    const dst = Skia.XYWHRect(sx - spH / 2, sy - spH, spH, spH);
+    if (charSheet) {
+      const look = cv.look || {};
+      const fW = charSheet.width() / 8;
+      const fH = charSheet.height() / 12;
+      const gs = (pair) => Skia.XYWHRect(0, pair * 2 * fH, fW, fH);
+      // Couches grisées semi-transparentes (personnage à terre)
+      canvas.drawImageRect(charSheet, gs(0), dst, _getTintPaint(look.skinTint  || '#c09070', 0.28));
+      canvas.drawImageRect(charSheet, gs(1), dst, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
+      canvas.drawImageRect(charSheet, gs(2), dst, _getTintPaint(look.shirtTint || '#888888', 0.28));
+      canvas.drawImageRect(charSheet, gs(3), dst, _getSpriteP(0.22));
+      canvas.drawImageRect(charSheet, gs(4), dst, _getSpriteP(0.22));
+      canvas.drawImageRect(charSheet, gs(5), dst, _getTintPaint(look.pantsTint || '#555555', 0.28));
     } else {
       const ds = Math.max(0.5, zoom * 0.45);
       const xp = Skia.Path.Make();
@@ -633,64 +662,64 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     return;
   }
 
-  // ── Sprite animé ──────────────────────────────────────────────────────────
+  // ── Sprite animé — global.png layered (8 cols × 12 rows × 32×32) ─────────
   const isMoving    = !!cv.isMoving;
-  const isAttacking = cv.combatFlash > 0.4;  // flash élevé = combat actif
-  // Priorité : attaque > course > marche > idle
-  const animImg = isAttacking && spriteImgs?.attack ? spriteImgs.attack
-                : isMoving    && spriteImgs?.run    ? spriteImgs.run
-                : isMoving    && spriteImgs?.walk   ? spriteImgs.walk
-                : spriteImgs?.idle;
-  const animKey    = isAttacking ? 'attack' : isMoving ? 'run' : 'idle';
-  const animFrames = SPRITES[animKey]?.frames
-                   || (isAttacking ? 8 : isMoving ? 8 : 12);
-  const animFps    = isAttacking ? 12 : isMoving ? 10 : 5;
+  const isAttacking = cv.combatFlash > 0.4;
+  // fps: 0 = idle figé col 0, sinon animation cycl
+  const fps      = isAttacking ? 14 : isMoving ? 8 : 0;
+  const FCOLS    = 8;
+  const frameIdx = fps > 0 ? Math.floor(t * fps) % FCOLS : 0;
+  // Direction : gauche (dirRow=1) → lignes impaires, autres → lignes paires
+  const dirOff   = (cv.dirRow === 1) ? 1 : 0;
 
-  let topY, headR, headY;
+  const spH = Math.max(18, zoom * (TILE_H / 2) * 2.6);
+  const spW = spH;
+  const spX = sx - spW / 2;
+  const bob = isMoving ? Math.sin(t * 10 + cv.idx) * 0.8*sc
+                       : Math.sin(t * 2  + cv.idx) * 0.3*sc;
+  const spYfinal = sy - spH + bob;   // pieds au niveau du sol (sy)
 
-  if (animImg) {
-    const frameIdx = Math.floor(t * animFps) % animFrames;
-    const frameW   = animImg.width() / animFrames;
-    const frameH   = animImg.height() / 4;             // sprite sheet 4 lignes (directions)
-    const dirRow   = cv.dirRow ?? 0;                   // 0=bas 1=gauche 2=droite 3=haut
-    const spH      = Math.max(20, zoom * (TILE_H / 2) * 3.6);  // taille pour frame 1:1 (plus grands)
-    const spW      = spH;                              // frame 64×64 → ratio 1:1
-    const spX      = sx - spW / 2;
-    const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;
-    const spYfinal = sy - spH + bob;
+  let topY  = spYfinal;
+  let headR = spW * 0.18;
+  let headY = spYfinal + spH * 0.12;
 
-    canvas.drawImageRect(
-      animImg,
-      Skia.XYWHRect(frameIdx * frameW, dirRow * frameH, frameW, frameH),  // ligne = direction
-      Skia.XYWHRect(spX, spYfinal, spW, spH),
-      _getSpriteP(baseA)
-    );
+  const charSheet = spriteImgs?.charSheet;
+  if (charSheet) {
+    const look = cv.look || {};
+    const {
+      skinTint  = '#ffe0c8',
+      hairTint  = '#3d1c02',
+      shirtTint = '#e74c3c',
+      pantsTint = '#2c3e50',
+    } = look;
 
-    topY  = spYfinal;
-    headR = spW * 0.22;
-    headY = spYfinal + spH * 0.14;
+    const fW = charSheet.width()  / FCOLS;   // 32
+    const fH = charSheet.height() / 12;      // 32
+    const dst  = Skia.XYWHRect(spX, spYfinal, spW, spH);
+    const getSrc = (pair) =>
+      Skia.XYWHRect(frameIdx * fW, (pair * 2 + dirOff) * fH, fW, fH);
 
-    // Ring indicateur
-    const isFollowed = cv.isFollowed;
-    canvas.drawCircle(
-      sx, sy - 1*sc,
-      spW * 0.5,
-      mkStrokeA(isFollowed ? '#ffffff' : col,
-                isFollowed ? 2.2*sc : 1.1*sc,
-                (isFollowed ? 0.95 : 0.38) * baseA)
-    );
+    // 6 couches : corps, cheveux, haut, ceinture, chaussures, pantalon
+    canvas.drawImageRect(charSheet, getSrc(0), dst, _getTintPaint(skinTint,  baseA));
+    canvas.drawImageRect(charSheet, getSrc(1), dst, _getTintPaint(hairTint,  baseA));
+    canvas.drawImageRect(charSheet, getSrc(2), dst, _getTintPaint(shirtTint, baseA));
+    canvas.drawImageRect(charSheet, getSrc(3), dst, _getSpriteP(baseA));
+    canvas.drawImageRect(charSheet, getSrc(4), dst, _getSpriteP(baseA));
+    canvas.drawImageRect(charSheet, getSrc(5), dst, _getTintPaint(pantsTint, baseA));
 
+    // Ring indicateur sous les pieds
+    canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
+      mkStrokeA(cv.isFollowed ? '#ffffff' : col,
+                cv.isFollowed ? 2.2*sc : 1.1*sc,
+                (cv.isFollowed ? 0.95 : 0.38) * baseA));
   } else {
-    // Fallback géométrique amélioré
+    // Fallback géométrique
     const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
     headR = geo.headR; headY = geo.headY; topY = geo.topY;
-
-    // Ring
-    const isFollowed = cv.isFollowed;
     canvas.drawCircle(sx, headY, headR + 2.4*sc,
-      mkStrokeA(isFollowed ? '#ffffff' : col,
-                isFollowed ? 2.2*sc : 1.2*sc,
-                (isFollowed ? 1.0 : 0.45) * baseA));
+      mkStrokeA(cv.isFollowed ? '#ffffff' : col,
+                cv.isFollowed ? 2.2*sc : 1.2*sc,
+                (cv.isFollowed ? 1.0 : 0.45) * baseA));
   }
 
   // ── Status effects visuels ────────────────────────────────────────────────
@@ -1428,12 +1457,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
   // Hauteur réelle du canvas (≠ SH qui est la hauteur écran)
   const canvasHRef = useRef(SH);
 
-  // ── Sprites — double chargement : useImage (PNG) + base64 (fallback immédiat) ──
-  const imgIdle   = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Idle_with_shadow.png'));
-  const imgWalk   = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Walk_with_shadow.png'));
-  const imgRun    = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Run_with_shadow.png'));
-  const imgAttack = useImage(require('../../assets/sprites/PNG/Sword/With_shadow/Sword_attack_with_shadow.png'));
-  const imgDeath  = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Death_with_shadow.png'));
+  // ── Sprite personnages (global.png 256×384, 8 cols × 12 rows × 32×32) ─────
+  const imgCharSheet = useImage(require('../../assets/sprites/characters/global.png'));
   // ── Animaux (faune) ────────────────────────────────────────────────────────
   const imgDeerIdle  = useImage(require('../../assets/sprites/animals/deer_idle.png'));
   const imgDeerRun   = useImage(require('../../assets/sprites/animals/deer_run.png'));
@@ -1450,58 +1475,29 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   const spriteImgsRef = useRef({});
 
-  // Chargement immédiat depuis base64 au montage (disponible dès la 1ère frame)
-  // Utilise fromBytes (API native iOS/Android) — fromBase64 n'existe que sur web
+  // Init spriteImgsRef (peuplé par les useImage ci-dessous)
   useEffect(() => {
-    const makeImg = (b64) => {
-      try {
-        // atob disponible dans Hermes (RN) → binary string → Uint8Array
-        const binStr = atob(b64);
-        const bytes  = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
-        const data = Skia.Data.fromBytes(bytes);
-        const img  = Skia.Image.MakeImageFromEncoded(data);
-        console.log('🖼️ sprite loaded:', img ? `${img.width()}x${img.height()}` : 'NULL');
-        return img;
-      } catch (e) {
-        console.warn('❌ sprite load error:', e.message);
-        return null;
-      }
-    };
-    const imgs = {
-      idle:   makeImg(SPRITES.idle.b64),
-      walk:   makeImg(SPRITES.walk.b64),
-      run:    makeImg(SPRITES.run.b64),
-      attack: makeImg(SPRITES.attack.b64),
-      death:  makeImg(SPRITES.death.b64),
-    };
-    const loaded = Object.values(imgs).filter(Boolean).length;
-    console.log(`✅ Sprites chargés: ${loaded}/5`);
-    spriteImgsRef.current = imgs;
+    spriteImgsRef.current = {};
   }, []);
 
-  // Mise à jour si useImage charge (meilleure qualité / rendu natif)
+  // Mise à jour si useImage charge
   useEffect(() => {
     const cur = spriteImgsRef.current;
-    if (imgIdle)     cur.idle         = imgIdle;
-    if (imgWalk)     cur.walk         = imgWalk;
-    if (imgRun)      cur.run          = imgRun;
-    if (imgAttack)   cur.attack       = imgAttack;
-    if (imgDeath)    cur.death        = imgDeath;
+    if (imgCharSheet) cur.charSheet      = imgCharSheet;
     // Animaux
-    if (imgDeerIdle) cur.animalDeerIdle = imgDeerIdle;
-    if (imgDeerRun)  cur.animalDeerRun  = imgDeerRun;
-    if (imgBoarIdle) cur.animalBoarIdle = imgBoarIdle;
-    if (imgBoarRun)  cur.animalBoarRun  = imgBoarRun;
-    if (imgBoarAtk)  cur.animalBoarAtk  = imgBoarAtk;
-    if (imgHareIdle) cur.animalHareIdle = imgHareIdle;
-    if (imgHareRun)  cur.animalHareRun  = imgHareRun;
-    if (imgWolfIdle) cur.animalWolfIdle = imgWolfIdle;
-    if (imgWolfRun)  cur.animalWolfRun  = imgWolfRun;
-    if (imgWolfBite) cur.animalWolfBite = imgWolfBite;
+    if (imgDeerIdle)  cur.animalDeerIdle = imgDeerIdle;
+    if (imgDeerRun)   cur.animalDeerRun  = imgDeerRun;
+    if (imgBoarIdle)  cur.animalBoarIdle = imgBoarIdle;
+    if (imgBoarRun)   cur.animalBoarRun  = imgBoarRun;
+    if (imgBoarAtk)   cur.animalBoarAtk  = imgBoarAtk;
+    if (imgHareIdle)  cur.animalHareIdle = imgHareIdle;
+    if (imgHareRun)   cur.animalHareRun  = imgHareRun;
+    if (imgWolfIdle)  cur.animalWolfIdle = imgWolfIdle;
+    if (imgWolfRun)   cur.animalWolfRun  = imgWolfRun;
+    if (imgWolfBite)  cur.animalWolfBite = imgWolfBite;
     // Tileset
-    if (imgTileset)  cur.tileset        = imgTileset;
-  }, [imgIdle, imgWalk, imgRun, imgAttack, imgDeath,
+    if (imgTileset)   cur.tileset        = imgTileset;
+  }, [imgCharSheet,
       imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
       imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
       imgTileset]);
@@ -1726,6 +1722,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
         isMoving: moved > 0.4,
         dirRow,
         weapon: c.weapon || 'stone_knife',
+        // Look unique déterministe (préservé entre ticks)
+        look: ex?.look || generateLook(c.id || String(i)),
       };
     });
 

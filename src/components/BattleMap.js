@@ -7,9 +7,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle,
+  PaintStyle, useImage,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { SPRITES } from '../utils/sprites';
 
 // ── Constantes isométriques ───────────────────────────────────────────────
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
@@ -28,6 +29,9 @@ const CHAMP_COLORS = [
 const SUPPLY_COLORS = {
   soin:'#2ecc71', force:'#e74c3c', vitesse:'#3498db', armure:'#f39c12',
   festin:'#ff9f43', adrenaline:'#ee5a24', camouflage:'#6ab04c', carte:'#f9ca24',
+};
+const FAUNA_COLORS = {
+  deer:'#d4a84b', wolf:'#7a8c8a', rabbit:'#ece8c0', boar:'#6a4020',
 };
 
 // ── Couleurs iso par biome — [top, droite(ombre), gauche(lumière)] ─────────
@@ -82,6 +86,26 @@ const BIOME_ISO = {
     ['#bcbcd4','#6e6e82','#a0a0b8'],
     ['#dcdce8','#9090a0','#c4c4d4'],
   ],
+  'volcan': [
+    ['#1a0600','#0e0200','#140400'],
+    ['#3a0c00','#200600','#2c0800'],
+    ['#5e1800','#360c00','#4a1000'],
+    ['#8c2800','#501600','#701e00'],
+    ['#aa3800','#641e00','#8a2a00'],
+    ['#c44e0a','#7c2e04','#a03808'],
+    ['#da6e20','#8a4010','#c05818'],
+    ['#f09040','#a06020','#d87830'],
+  ],
+  'jungle': [
+    ['#060e04','#020804','#040c04'],
+    ['#0c1e08','#060e04','#081808'],
+    ['#142e0e','#091808','#101a0c'],  // actually 0a1c0a
+    ['#1e4214','#0e2408','#182e10'],
+    ['#285a1a','#143010','#203e14'],
+    ['#347420','#1a3e12','#28521a'],
+    ['#40902a','#224e16','#326820'],
+    ['#50a838','#2c6020','#3e7e2c'],
+  ],
 };
 
 function tileColors(biome, h) {
@@ -92,7 +116,7 @@ function tileColors(biome, h) {
 
 // ── Génération procédurale de rivières sur la heightmap ───────────────────
 function addRivers(hm, biome, rng) {
-  const nb = biome === 'marais' ? 3 : biome === 'forêt' ? 2 : biome === 'montagne' ? 2 : 1;
+  const nb = biome === 'marais' ? 3 : biome === 'forêt' ? 2 : biome === 'montagne' ? 2 : biome === 'jungle' ? 4 : 1;
   for (let r = 0; r < nb; r++) {
     // Départ sur un bord (h élevé)
     let gx = Math.floor(2 + rng() * (HM_CELLS - 4));
@@ -137,6 +161,8 @@ function clientHeightMap(biome, seed) {
     'toundra':  { peaks:7,  maxH:6, spread:5,  water:false },
     'marais':   { peaks:2,  maxH:2, spread:13, water:true  },
     'montagne': { peaks:10, maxH:7, spread:4,  water:false },
+    'volcan':   { peaks:12, maxH:7, spread:3,  water:false }, // très accidenté, cratère central
+    'jungle':   { peaks:3,  maxH:3, spread:14, water:true  }, // plat, dense, humide
   };
   const cfg = profiles[biome] || profiles['forêt'];
   const rng = seededRNG(strHash(key));
@@ -203,16 +229,16 @@ function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
 }
 
 // Centre iso de la map (pour camera par défaut)
-// On décale légèrement vers le bas (iy+20) pour mieux centrer visuellement
+// wToIso(50,50,1) → iy=112, on cible iy=120 (centre exact de la map 0-240)
 function mapCenterIso() {
   const { ix, iy } = wToIso(50, 50, 1);
-  return { ix, iy: iy - 18 };
+  return { ix, iy: iy + 8 };
 }
 
 // ── Pool de paints ────────────────────────────────────────────────────────
 let _FP = null, _AP = null, _SP = null, _SAP = null;
 // Pool de paths réutilisables (évite GC intensif sur les tiles)
-let _tp = null, _rp = null, _lp = null;  // top, right, left tile faces
+let _tp = null, _rp = null, _lp = null, _ep = null;  // top, right, left, edge
 const _CC = {};
 
 function _initPool() {
@@ -224,8 +250,17 @@ function _initPool() {
   _tp  = Skia.Path.Make();
   _rp  = Skia.Path.Make();
   _lp  = Skia.Path.Make();
+  _ep  = Skia.Path.Make();  // arêtes lumineuses
 }
 function _c(s) { return _CC[s] || (_CC[s] = Skia.Color(s)); }
+
+// ── Sprite paint (dédié, non partagé) ────────────────────────────────────
+let _SPRITE_P = null;
+function _getSpriteP(alpha) {
+  if (!_SPRITE_P) { _SPRITE_P = Skia.Paint(); }
+  _SPRITE_P.setAlphaf(alpha);
+  return _SPRITE_P;
+}
 
 function mkFill(col) { _FP.setColor(_c(col)); _FP.setAlphaf(1);    return _FP; }
 function mkAlpha(col,a) { _AP.setColor(_c(col)); _AP.setAlphaf(a); return _AP; }
@@ -263,37 +298,127 @@ function spawnParticles(pool, wx, wy, type, color) {
   }
 }
 
-// ── Dessin d'un cube isométrique ──────────────────────────────────────────
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H) {
+// ── Pseudo-random déterministe par tile (évite Math.random en draw loop) ──
+function _tileRng(gx, gy, idx) {
+  const s = ((gx * 73856093) ^ (gy * 19349663) ^ (idx * 83492791)) >>> 0;
+  return ((s * 1664525 + 1013904223) >>> 0) / 4294967296;
+}
+
+// ── Dessin d'un cube isométrique — rendu riche ────────────────────────────
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
-  const tz = h * TILE_Z * zoom;   // hauteur de la colonne visible
+  const tz = h * TILE_Z * zoom;
 
   const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, h);
   const tx = W / 2 + (ix - camIx) * zoom;
   const ty = H / 2 + (iy - camIy) * zoom;
 
-  // Culling : hors écran ?
   if (tx < -tw * 3 || tx > W + tw * 3 || ty < -th - tz - 16 || ty > H + th + 16) return;
 
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
   const [topC, rightC, leftC] = tileColors(biome, h);
 
-  // ── Face haut (losange) ──────────────────────────────────────────────────
+  // ── Variations déterministes per-tile ────────────────────────────────────
+  const r0 = _tileRng(gx, gy, 0);
+  const r1 = _tileRng(gx, gy, 1);
+  const r2 = _tileRng(gx, gy, 2);
+  const r3 = _tileRng(gx, gy, 3);
+  const r4 = _tileRng(gx, gy, 4);
+
+  // ── Face haut (losange) ───────────────────────────────────────────────────
   _tp.rewind();
   _tp.moveTo(tx,      ty - th);
   _tp.lineTo(tx + tw, ty);
   _tp.lineTo(tx,      ty + th);
   _tp.lineTo(tx - tw, ty);
   _tp.close();
-  canvas.drawPath(_tp, mkAlpha(topC, 0.92 * dimA));
+  canvas.drawPath(_tp, mkAlpha(topC, dimA));
 
-  // Face haut : léger reflet (eau animé ignoré ici pour perf)
-  if (zoom > 1.2 && dimA > 0.5) {
-    canvas.drawCircle(tx - tw * 0.3, ty - th * 0.4, tw * 0.22, mkAlpha('#ffffff', 0.10 * dimA));
+  // ── Texture de surface (uniquement si visible) ────────────────────────────
+  if (zoom > 0.9 && dimA > 0.25 && h > 0) {
+    // Patch sombre (creux / ombre)
+    const dkX = tx + (r0 - 0.5) * tw * 0.7;
+    const dkY = ty + (r1 - 0.5) * th * 0.7;
+    canvas.drawCircle(dkX, dkY, tw * (0.18 + r2 * 0.12), mkAlpha('#000000', 0.14 * dimA));
+
+    // Patch clair (relief / surbrillance)
+    const ltX = tx + (r3 - 0.65) * tw * 0.55;
+    const ltY = ty + (r4 - 0.65) * th * 0.55;
+    canvas.drawCircle(ltX, ltY, tw * 0.14, mkAlpha('#ffffff', 0.16 * dimA));
+
+    // Détails biome-spécifiques (seulement à zoom suffisant)
+    if (zoom > 1.4) {
+      if (biome === 'forêt') {
+        // Deux touffes d'herbe
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.55, ty + (r1-0.6)*th*0.5,  tw*0.09, mkAlpha('#0d2a08', 0.50*dimA));
+        canvas.drawCircle(tx + (r2-0.4)*tw*0.5,  ty + (r3-0.4)*th*0.55, tw*0.07, mkAlpha('#162e10', 0.45*dimA));
+      } else if (biome === 'jungle') {
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.6, ty + (r1-0.5)*th*0.6, tw*0.12, mkAlpha('#042204', 0.55*dimA));
+        canvas.drawCircle(tx + (r2-0.5)*tw*0.4, ty + (r3-0.5)*th*0.4, tw*0.08, mkAlpha('#0a3008', 0.45*dimA));
+      } else if (biome === 'désert') {
+        // Lignes de dunes ondulées
+        _ep.rewind();
+        _ep.moveTo(tx - tw*0.45, ty + (r0-0.5)*th*0.5);
+        _ep.lineTo(tx + tw*0.45, ty + (r1-0.5)*th*0.5);
+        canvas.drawPath(_ep, mkStrokeA('#c89850', Math.max(0.6, zoom*0.5), 0.22*dimA));
+      } else if (biome === 'toundra') {
+        // Patch de neige
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.22, mkAlpha('#d8eeff', 0.32*dimA));
+        canvas.drawCircle(tx + (r2-0.5)*tw*0.35, ty + (r3-0.5)*th*0.35, tw*0.12, mkAlpha('#eef8ff', 0.25*dimA));
+      } else if (biome === 'marais') {
+        // Flaque sombre
+        _ep.rewind();
+        _ep.addOval(Skia.XYWHRect(tx - tw*0.22 + (r0-0.5)*tw*0.3, ty - th*0.1 + (r1-0.5)*th*0.4, tw*0.44, th*0.22));
+        canvas.drawPath(_ep, mkAlpha('#041208', 0.22*dimA));
+      } else if (biome === 'montagne') {
+        // Fissure rocheuse
+        _ep.rewind();
+        _ep.moveTo(tx + (r0-0.5)*tw*0.5, ty - th*0.35);
+        _ep.lineTo(tx + (r1-0.5)*tw*0.3, ty + th*0.45);
+        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom*0.4), 0.16*dimA));
+      } else if (biome === 'volcan') {
+        // Veine de lave / chaleur
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.10, mkAlpha('#cc2000', 0.30*dimA));
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.05, mkAlpha('#ff6600', 0.45*dimA));
+      }
+    }
+  } else if (h === 0 && zoom > 0.7 && dimA > 0.15 && t != null) {
+    // ── Eau animée (h=0) — rides concentriques pulsées ───────────────────────
+    for (let wi = 0; wi < 3; wi++) {
+      const phase = ((t * 0.7 + r0 * 2.5 + wi * 0.38) % 1.0);
+      const ringA = (1 - phase) * 0.20 * dimA;
+      if (ringA < 0.015) continue;
+      const rw = tw * (0.20 + phase * 0.72);
+      const rh = th * (0.20 + phase * 0.72);
+      _ep.rewind();
+      _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
+      canvas.drawPath(_ep, mkStrokeA('#78b8e0', Math.max(0.5, zoom * 0.35), ringA));
+    }
+    // Reflet de lumière mobile
+    if (zoom > 1.2) {
+      const reflX = tx + Math.sin(t * 0.55 + r1 * 5.5) * tw * 0.30;
+      const reflY = ty + Math.cos(t * 0.40 + r2 * 5.5) * th * 0.25;
+      canvas.drawCircle(reflX, reflY, tw * 0.11, mkAlpha('#c8e8f8', 0.42 * dimA));
+      canvas.drawCircle(reflX + tw*0.06, reflY - th*0.04, tw * 0.05, mkAlpha('#ffffff', 0.35 * dimA));
+    }
   }
 
-  // ── Faces latérales (uniquement si h > 0 et cube visible) ───────────────
+  // ── Arête lumineuse (haut-gauche + haut-droite) → effet 3D marqué ────────
+  if (zoom > 0.8 && dimA > 0.35) {
+    _ep.rewind();
+    _ep.moveTo(tx - tw, ty);       // coin gauche
+    _ep.lineTo(tx,      ty - th);  // sommet
+    _ep.lineTo(tx + tw, ty);       // coin droit
+    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.8, zoom * 0.7), 0.32 * dimA));
+  }
+
+  // ── Contour fin du losange (séparateur entre tiles) ───────────────────────
+  if (dimA > 0.2) {
+    canvas.drawPath(_tp, mkStrokeA('#000000', Math.max(0.4, zoom * 0.35), 0.18 * dimA));
+  }
+
+  // ── Faces latérales (h > 0) ───────────────────────────────────────────────
   if (h > 0 && tz > 0.5) {
     // Face droite (ombre)
     _rp.rewind();
@@ -302,7 +427,26 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H) {
     _rp.lineTo(tx + tw, ty + tz);
     _rp.lineTo(tx,      ty + th + tz);
     _rp.close();
-    canvas.drawPath(_rp, mkAlpha(rightC, 0.95 * dimA));
+    canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
+
+    // Ligne de crête droite (jonction face haute / face droite)
+    _ep.rewind();
+    _ep.moveTo(tx,      ty + th);
+    _ep.lineTo(tx + tw, ty);
+    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.6, zoom * 0.55), 0.22 * dimA));
+
+    // Lignes de couches horizontales (effet terrain stratifié)
+    if (zoom > 1.2 && h >= 2 && dimA > 0.35) {
+      const layers = Math.min(h - 1, 3);
+      for (let li = 1; li <= layers; li++) {
+        const t1 = li / h;
+        const ly = tz * t1;
+        _ep.rewind();
+        _ep.moveTo(tx + tw * t1, ty + th + ly);
+        _ep.lineTo(tx + tw,      ty         + ly);
+        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.4), 0.14 * dimA));
+      }
+    }
 
     // Face gauche (lumière)
     _lp.rewind();
@@ -311,22 +455,105 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H) {
     _lp.lineTo(tx,      ty + th + tz);
     _lp.lineTo(tx - tw, ty + tz);
     _lp.close();
-    canvas.drawPath(_lp, mkAlpha(leftC, 0.95 * dimA));
+    canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
+
+    // Ligne de crête gauche
+    _ep.rewind();
+    _ep.moveTo(tx - tw, ty);
+    _ep.lineTo(tx,      ty + th);
+    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.6, zoom * 0.55), 0.18 * dimA));
+
+    // Lignes de couches gauche
+    if (zoom > 1.2 && h >= 2 && dimA > 0.35) {
+      const layers = Math.min(h - 1, 3);
+      for (let li = 1; li <= layers; li++) {
+        const t1 = li / h;
+        const ly = tz * t1;
+        _ep.rewind();
+        _ep.moveTo(tx - tw,          ty      + ly);
+        _ep.lineTo(tx - tw * (1-t1), ty + th + ly);
+        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.4), 0.12 * dimA));
+      }
+    }
+
+    // Arête inférieure (bas des flancs — ligne sombre de contour)
+    if (zoom > 1.0 && dimA > 0.4) {
+      _ep.rewind();
+      _ep.moveTo(tx - tw, ty + tz);
+      _ep.lineTo(tx,      ty + th + tz);
+      _ep.lineTo(tx + tw, ty + tz);
+      canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.45), 0.20 * dimA));
+    }
   }
 
-  // Séparateur de tuiles (visible seulement à fort zoom)
-  if (zoom > 1.1 && dimA > 0.5) {
-    canvas.drawPath(_tp, mkStrokeA('#000000', 0.4, 0.12 * dimA));
+  // ── Arbre isométrique (forêt/jungle/montagne) ────────────────────────────
+  if (zoom > 1.5 && dimA > 0.25 && h > 0) {
+    const hasTree = (biome === 'forêt'    && r4 < 0.32)
+                 || (biome === 'jungle'   && r4 < 0.44)
+                 || (biome === 'montagne' && h >= 4 && r4 < 0.24);
+    if (hasTree) {
+      const treeX = tx + (r0 - 0.5) * tw * 0.55;
+      const treeY = ty + (r1 - 0.5) * th * 0.45 - th * 0.25;
+      const treeH = Math.max(tz * 0.55, tw * (0.50 + r2 * 0.32));
+      const trunkW = treeH * 0.23;
+      // Tronc
+      _ep.rewind();
+      _ep.addRect(Skia.XYWHRect(treeX - trunkW * 0.4, treeY, trunkW * 0.8, treeH * 0.48));
+      canvas.drawPath(_ep, mkAlpha(biome === 'montagne' ? '#3a3028' : '#5a3210', 0.88 * dimA));
+      if (biome === 'montagne') {
+        // Sapin : 3 cercles en pyramide
+        canvas.drawCircle(treeX, treeY - treeH * 0.13, treeH * 0.27, mkAlpha('#1e3020', 0.78 * dimA));
+        canvas.drawCircle(treeX, treeY - treeH * 0.35, treeH * 0.20, mkAlpha('#1e3020', 0.74 * dimA));
+        canvas.drawCircle(treeX, treeY - treeH * 0.52, treeH * 0.13, mkAlpha('#243828', 0.70 * dimA));
+        // Neige sur sommet
+        canvas.drawCircle(treeX, treeY - treeH * 0.55, treeH * 0.07, mkAlpha('#e8f4ff', 0.55 * dimA));
+      } else {
+        // Feuillage touffu (forêt/jungle)
+        const leafDark  = biome === 'jungle' ? '#0a2408' : '#0e2408';
+        const leafMain  = biome === 'jungle' ? '#1a4010' : '#1c3c12';
+        const leafLight = biome === 'jungle' ? '#30601a' : '#28521a';
+        canvas.drawCircle(treeX,              treeY - treeH * 0.10, treeH * 0.38, mkAlpha(leafDark,  0.72 * dimA));
+        canvas.drawCircle(treeX,              treeY - treeH * 0.10, treeH * 0.29, mkAlpha(leafMain,  0.82 * dimA));
+        canvas.drawCircle(treeX,              treeY - treeH * 0.32, treeH * 0.23, mkAlpha(leafMain,  0.78 * dimA));
+        canvas.drawCircle(treeX - treeH*0.14, treeY - treeH * 0.22, treeH * 0.10, mkAlpha(leafLight, 0.45 * dimA));
+      }
+    }
   }
 
-  // Brume de guerre : overlay sombre supplémentaire
+  // Brume de guerre overlay
   if (fogA > 0.05) {
     canvas.drawPath(_tp, mkAlpha('#000814', fogA * 0.72));
   }
 }
 
-// ── Figurine isométrique (humanoïde géométrique) ─────────────────────────
-function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm) {
+// ── Figurine géométrique améliorée (fallback si pas de sprite) ────────────
+function _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col) {
+  const bob   = Math.sin(t * 4 + cv.idx) * 1.0 * sc;
+  const legTop = sy - 2*sc;
+  const legH   = 8*sc;
+  // Jambes
+  canvas.drawRect(Skia.XYWHRect(sx - 4.5*sc, legTop + bob,  2.5*sc, legH - bob), mkAlpha(col, 0.68 * baseA));
+  canvas.drawRect(Skia.XYWHRect(sx + 2.0*sc, legTop - bob,  2.5*sc, legH + bob), mkAlpha(col, 0.68 * baseA));
+  // Corps
+  const bodyW = 8*sc, bodyH = 12*sc;
+  const bodyX = sx - bodyW/2, bodyY = legTop - bodyH;
+  canvas.drawRect(Skia.XYWHRect(bodyX, bodyY, bodyW, bodyH), mkAlpha(col, 0.92 * baseA));
+  canvas.drawRect(Skia.XYWHRect(bodyX+1.2*sc, bodyY+1.5*sc, bodyW*0.32, bodyH*0.52), mkAlpha('#ffffff', 0.18*baseA));
+  // Bras
+  const armY   = bodyY + 2*sc;
+  const armBob = Math.sin(t * 4 + cv.idx + Math.PI) * 1.0 * sc;
+  canvas.drawRect(Skia.XYWHRect(bodyX-3*sc, armY+armBob, 3*sc, 8*sc), mkAlpha(col, 0.65*baseA));
+  canvas.drawRect(Skia.XYWHRect(bodyX+bodyW, armY-armBob, 3*sc, 8*sc), mkAlpha(col, 0.65*baseA));
+  // Tête
+  const headR = 5.5*sc;
+  const headY = bodyY - headR - 1*sc;
+  canvas.drawCircle(sx, headY, headR, mkAlpha(col, 0.95*baseA));
+  canvas.drawCircle(sx - headR*0.30, headY - headR*0.25, headR*0.36, mkAlpha('#ffffff', 0.24*baseA));
+  return { headR, headY, topY: headY - headR };
+}
+
+// ── Figurine isométrique (sprite ou géométrique) ─────────────────────────
+function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs) {
   const wz = getElev(cv.x, cv.y, hm);
   const { ix, iy } = wToIso(cv.x, cv.y, wz);
   const sx = W / 2 + (ix - camIx) * zoom;
@@ -334,123 +561,203 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm) {
 
   if (sx < -50 || sx > W + 50 || sy < -100 || sy > H + 50) return;
 
-  // Figurine mort
-  if (cv.isDead) {
-    const ds = Math.max(0.5, zoom * 0.45);
-    const xp = Skia.Path.Make();
-    xp.moveTo(sx - 5*ds, sy - 2*ds); xp.lineTo(sx + 5*ds, sy + 4*ds);
-    xp.moveTo(sx + 5*ds, sy - 2*ds); xp.lineTo(sx - 5*ds, sy + 4*ds);
-    canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
-    return;
-  }
-
-  const sc   = Math.max(0.45, zoom * 0.56);
+  const sc    = Math.max(0.45, zoom * 0.56);
   const baseA = cv.hasCamo ? 0.35 : 1.0;
   const col   = cv.color;
-  const bob   = Math.sin(t * 4 + cv.idx) * 1.0 * sc;
 
-  // Glow aura (3 couches)
-  const gPulse = cv.combatFlash > 0 ? 1.5 : 1.0;
-  canvas.drawCircle(sx, sy - 10*sc, 18*sc, mkAlpha(col, 0.030 * baseA * gPulse));
-  canvas.drawCircle(sx, sy - 10*sc, 12*sc, mkAlpha(col, 0.080 * baseA * gPulse));
-  canvas.drawCircle(sx, sy - 10*sc,  7*sc, mkAlpha(col, 0.18  * baseA * gPulse));
+  // ── Glow aura ────────────────────────────────────────────────────────────
+  const gPulse = cv.combatFlash > 0 ? 1.6 : 1.0;
+  canvas.drawCircle(sx, sy - 10*sc, 20*sc, mkAlpha(col, 0.022 * baseA * gPulse));
+  canvas.drawCircle(sx, sy - 10*sc, 13*sc, mkAlpha(col, 0.070 * baseA * gPulse));
+  canvas.drawCircle(sx, sy - 10*sc,  7*sc, mkAlpha(col, 0.17  * baseA * gPulse));
 
   // Flash combat
   if (cv.combatFlash > 0) {
-    canvas.drawCircle(sx, sy - 8*sc, 15*sc, mkAlpha('#ff6644', cv.combatFlash * 0.32));
+    canvas.drawCircle(sx, sy - 8*sc, 16*sc, mkAlpha('#ff6644', cv.combatFlash * 0.30));
   }
 
-  // Ombre portée (ellipse aplatie en iso)
+  // Ombre portée
   const shadowP = Skia.Path.Make();
-  shadowP.addOval(Skia.XYWHRect(sx - 6*sc, sy - 1*sc, 12*sc, 4*sc));
-  canvas.drawPath(shadowP, mkAlpha('#000000', 0.30 * baseA));
+  shadowP.addOval(Skia.XYWHRect(sx - 7*sc, sy - 1.2*sc, 14*sc, 4.5*sc));
+  canvas.drawPath(shadowP, mkAlpha('#000000', 0.28 * baseA));
 
-  // ── Jambes ──────────────────────────────────────────────────────────────
-  const legTop = sy - 2*sc;   // base des jambes (juste sous le corps)
-  const legH   = 8*sc;
-  canvas.drawRect(Skia.XYWHRect(sx - 4.5*sc, legTop + bob,  2.5*sc, legH - bob), mkAlpha(col, 0.68 * baseA));
-  canvas.drawRect(Skia.XYWHRect(sx + 2.0*sc, legTop - bob,  2.5*sc, legH + bob), mkAlpha(col, 0.68 * baseA));
-
-  // ── Corps ────────────────────────────────────────────────────────────────
-  const bodyW = 8*sc, bodyH = 12*sc;
-  const bodyX = sx - bodyW / 2, bodyY = legTop - bodyH;
-  canvas.drawRect(Skia.XYWHRect(bodyX,            bodyY,            bodyW,       bodyH),   mkAlpha(col, 0.92 * baseA));
-  canvas.drawRect(Skia.XYWHRect(bodyX + 1.2*sc,   bodyY + 1.5*sc,  bodyW*0.32,  bodyH*0.52), mkAlpha('#ffffff', 0.18 * baseA));
-
-  // ── Bras ─────────────────────────────────────────────────────────────────
-  const armY   = bodyY + 2*sc;
-  const armBob = Math.sin(t * 4 + cv.idx + Math.PI) * 1.0 * sc;
-  canvas.drawRect(Skia.XYWHRect(bodyX - 3*sc,          armY + armBob, 3*sc, 8*sc), mkAlpha(col, 0.65 * baseA));
-  canvas.drawRect(Skia.XYWHRect(bodyX + bodyW,          armY - armBob, 3*sc, 8*sc), mkAlpha(col, 0.65 * baseA));
-
-  // ── Tête ─────────────────────────────────────────────────────────────────
-  const headR = 5.5*sc;
-  const headY = bodyY - headR - 1*sc;
-  canvas.drawCircle(sx, headY, headR, mkAlpha(col, 0.95 * baseA));
-  canvas.drawCircle(sx - headR*0.30, headY - headR*0.25, headR*0.36, mkAlpha('#ffffff', 0.24 * baseA));
-
-  // Yeux (zoom élevé uniquement)
-  if (zoom > 1.8) {
-    canvas.drawCircle(sx - 1.8*sc, headY - 0.5*sc, 0.9*sc, mkAlpha('#000000', 0.72));
-    canvas.drawCircle(sx + 1.8*sc, headY - 0.5*sc, 0.9*sc, mkAlpha('#000000', 0.72));
+  // ── Figure morte ──────────────────────────────────────────────────────────
+  if (cv.isDead) {
+    // Utilise le vrai sprite death (dernier frame) ou fallback idle
+    const deathImg = spriteImgs?.death || spriteImgs?.idle;
+    if (deathImg) {
+      const deathFrames = spriteImgs?.death ? (SPRITES.death?.frames || 7) : 12;
+      const spH    = 34 * sc;
+      const frameW = deathImg.width() / deathFrames;
+      const frameH = deathImg.height();
+      const spW    = spH * (frameW / frameH);
+      // Affiche le dernier frame (position allongé)
+      const lastFrame = deathFrames - 1;
+      canvas.drawImageRect(
+        deathImg,
+        Skia.XYWHRect(lastFrame * frameW, 0, frameW, frameH),
+        Skia.XYWHRect(sx - spW / 2, sy - spH, spW, spH),
+        _getSpriteP(0.30 * baseA)
+      );
+    } else {
+      const ds = Math.max(0.5, zoom * 0.45);
+      const xp = Skia.Path.Make();
+      xp.moveTo(sx-5*ds, sy-2*ds); xp.lineTo(sx+5*ds, sy+4*ds);
+      xp.moveTo(sx+5*ds, sy-2*ds); xp.lineTo(sx-5*ds, sy+4*ds);
+      canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
+    }
+    return;
   }
 
-  // Ring (suivi = blanc, sinon couleur champion)
-  const isFollowed = cv.isFollowed;
-  canvas.drawCircle(sx, headY, headR + 2.2*sc,
-    mkStrokeA(isFollowed ? '#ffffff' : col,
-              isFollowed ? 2.2*sc : 1.2*sc,
-              (isFollowed ? 1.0 : 0.45) * baseA));
+  // ── Sprite animé ──────────────────────────────────────────────────────────
+  const isMoving    = !!cv.isMoving;
+  const isAttacking = cv.combatFlash > 0.4;  // flash élevé = combat actif
+  // Priorité : attaque > course > marche > idle
+  const animImg = isAttacking && spriteImgs?.attack ? spriteImgs.attack
+                : isMoving    && spriteImgs?.run    ? spriteImgs.run
+                : isMoving    && spriteImgs?.walk   ? spriteImgs.walk
+                : spriteImgs?.idle;
+  const animKey    = isAttacking ? 'attack' : isMoving ? 'run' : 'idle';
+  const animFrames = SPRITES[animKey]?.frames
+                   || (isAttacking ? 8 : isMoving ? 8 : 12);
+  const animFps    = isAttacking ? 12 : isMoving ? 10 : 5;
+
+  let topY, headR, headY;
+
+  if (animImg) {
+    const frameIdx = Math.floor(t * animFps) % animFrames;
+    const frameW   = animImg.width() / animFrames;
+    const frameH   = animImg.height();
+    const spH      = 40*sc;
+    const spW      = spH * (frameW / frameH);
+    const spX      = sx - spW / 2;
+    const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;
+    const spYfinal = sy - spH + bob;
+
+    canvas.drawImageRect(
+      animImg,
+      Skia.XYWHRect(frameIdx * frameW, 0, frameW, frameH),
+      Skia.XYWHRect(spX, spYfinal, spW, spH),
+      _getSpriteP(baseA)
+    );
+
+    topY  = spYfinal;
+    headR = spW * 0.22;
+    headY = spYfinal + spH * 0.14;
+
+    // Ring indicateur
+    const isFollowed = cv.isFollowed;
+    canvas.drawCircle(
+      sx, sy - 1*sc,
+      spW * 0.5,
+      mkStrokeA(isFollowed ? '#ffffff' : col,
+                isFollowed ? 2.2*sc : 1.1*sc,
+                (isFollowed ? 0.95 : 0.38) * baseA)
+    );
+
+  } else {
+    // Fallback géométrique amélioré
+    const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
+    headR = geo.headR; headY = geo.headY; topY = geo.topY;
+
+    // Ring
+    const isFollowed = cv.isFollowed;
+    canvas.drawCircle(sx, headY, headR + 2.4*sc,
+      mkStrokeA(isFollowed ? '#ffffff' : col,
+                isFollowed ? 2.2*sc : 1.2*sc,
+                (isFollowed ? 1.0 : 0.45) * baseA));
+  }
+
+  // ── Status effects visuels ────────────────────────────────────────────────
+  const se = cv.se || [];
+  if (se.includes('bleed')) {
+    // Gouttes rouges (2 petits cercles)
+    canvas.drawCircle(sx - 3*sc, sy - 4*sc, 1.4*sc, mkAlpha('#e74c3c', 0.85));
+    canvas.drawCircle(sx + 2*sc, sy - 6*sc, 1.0*sc, mkAlpha('#e74c3c', 0.70));
+  }
+  if (se.includes('stun')) {
+    // Étoiles jaunes (petits losanges)
+    for (let i=0;i<3;i++) {
+      const ang = (t * 3 + i * 2.1) % (Math.PI*2);
+      const sr = 7*sc;
+      canvas.drawCircle(sx + Math.cos(ang)*sr, (topY||headY) - 3*sc + Math.sin(ang)*sr*0.4,
+        1.8*sc, mkAlpha('#f1c40f', 0.90));
+    }
+  }
+  if (se.includes('poison')) {
+    canvas.drawCircle(sx, sy - 14*sc, 5*sc, mkAlpha('#27ae60', 0.25 + Math.sin(t*3)*0.08));
+  }
 
   // ── Barres HP + survie ────────────────────────────────────────────────────
-  const bw = 22*sc, bh = 2.6*sc;
-  const bx  = sx - bw / 2;
-  const by  = headY - headR - (cv.hunger!=null ? 12*sc : 7*sc);
+  const bw = 24*sc, bh = 2.8*sc;
+  const bx = sx - bw / 2;
+  const by = (topY !== undefined ? topY : headY - headR) - (cv.hunger!=null ? 13*sc : 8*sc);
 
-  // HP
-  canvas.drawRect(Skia.XYWHRect(bx - 1, by - 1, bw + 2, bh + 2), mkAlpha('#000000', 0.72));
+  canvas.drawRect(Skia.XYWHRect(bx-1, by-1, bw+2, bh+2), mkAlpha('#000000', 0.75));
   const hpRatio = Math.max(0, cv.hp / cv.maxHp);
   const barC    = hpRatio > 0.6 ? '#2ecc71' : hpRatio > 0.3 ? '#f39c12' : '#e74c3c';
   canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh), mkFill(barC));
+  // Reflet HP bar
+  canvas.drawRect(Skia.XYWHRect(bx, by, bw * hpRatio, bh*0.45), mkAlpha('#ffffff', 0.18));
 
-  // Faim (orange) + soif (bleu) — affichées si le champion a ces attributs
   if (cv.hunger != null) {
-    const by2 = by + bh + 1.2*sc;
+    const by2 = by + bh + 1.4*sc;
     const by3 = by2 + bh + 1.0*sc;
-    canvas.drawRect(Skia.XYWHRect(bx-1, by2-1, bw+2, bh+2), mkAlpha('#000000', 0.60));
-    canvas.drawRect(Skia.XYWHRect(bx,   by2,   bw * Math.max(0, cv.hunger/100), bh), mkAlpha('#e67e22', 0.88));
-    canvas.drawRect(Skia.XYWHRect(bx-1, by3-1, bw+2, bh+2), mkAlpha('#000000', 0.60));
-    canvas.drawRect(Skia.XYWHRect(bx,   by3,   bw * Math.max(0, cv.thirst/100), bh), mkAlpha('#3498db', 0.88));
+    canvas.drawRect(Skia.XYWHRect(bx-1,by2-1,bw+2,bh+2), mkAlpha('#000000', 0.62));
+    canvas.drawRect(Skia.XYWHRect(bx,by2,bw*Math.max(0,cv.hunger/100),bh), mkAlpha('#e67e22',0.88));
+    canvas.drawRect(Skia.XYWHRect(bx-1,by3-1,bw+2,bh+2), mkAlpha('#000000', 0.62));
+    canvas.drawRect(Skia.XYWHRect(bx,by3,bw*Math.max(0,cv.thirst/100),bh), mkAlpha('#3498db',0.88));
   }
 
   // ── Nom (zoom fort) ───────────────────────────────────────────────────────
   if (zoom > 1.6 && fm) {
     const approxW = cv.name.length * 4.5;
-    canvas.drawText(cv.name, sx - approxW / 2, by - 4, mkAlpha('#ffffff', 0.82 * baseA), fm);
+    canvas.drawText(cv.name, sx - approxW/2, by - 4, mkAlpha('#ffffff', 0.82*baseA), fm);
+  }
+
+  // ── Badge arme (zoom fort) ────────────────────────────────────────────────
+  if (cv.weapon && cv.weapon !== 'stone_knife' && cv.weapon !== 'fists' && zoom > 1.4 && fm) {
+    const wIcons = { bow:'🏹', wooden_bow:'🏹', sword:'⚔️', spear:'🗡️',
+      crude_spear:'🗡️', club:'🪵', stone_axe:'🪓', hunting_knife:'🔪',
+      wooden_shield:'🛡️', shield:'🛡️', sling:'🪨' };
+    const icon = wIcons[cv.weapon];
+    if (icon) canvas.drawText(icon, sx + headR + 1*sc, headY + 2, mkAlpha('#ffffff', 0.70*baseA), fm);
   }
 
   // ── Badge hauteur ─────────────────────────────────────────────────────────
   if (cv.elevation > 3 && zoom > 0.9 && fm) {
-    canvas.drawText(`▲${cv.elevation}`, sx + headR + 2*sc, headY + 2,
+    canvas.drawText(`▲${cv.elevation}`, sx + (headR||5*sc) + 2*sc, (topY||headY) + 4,
       mkAlpha('#f39c12', 0.78), fm);
   }
 }
 
 // ── Scène isométrique principale ──────────────────────────────────────────
-function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, W, H) {
+function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, W, H, spriteImgs) {
   _initPool();
 
   const biome = v.biome || 'forêt';
   const hm    = v.heightMap;
 
-  // Fond (ciel nuit/jour)
-  const isNight = (v.dayPhase || 0) >= 18;
-  canvas.drawColor(Skia.Color(isNight ? '#020308' : '#040509'));
+  // Fond (ciel nuit/jour) — dégradé atmosphérique
+  const dayPhase  = v.dayPhase || 0;
+  const isNight   = dayPhase >= 18;
+  const isDusk    = dayPhase >= 16 && dayPhase < 18;
+  const isDawn    = dayPhase >= 5  && dayPhase < 7;
+  const skyTop    = isNight ? '#010206' : isDusk ? '#1a0a1e' : isDawn ? '#0d1a2e' : '#040509';
+  const skyMid    = isNight ? '#020412' : isDusk ? '#3d1445' : isDawn ? '#1a3a5c' : '#060a14';
+  canvas.drawColor(Skia.Color(skyTop));
+  // Gradient vertical (horizon plus clair)
+  const skyP = Skia.Path.Make();
+  skyP.addRect(Skia.XYWHRect(0, H*0.3, W, H*0.7));
+  canvas.drawPath(skyP, mkAlpha(isNight ? '#0a0520' : isDusk ? '#4a1a55' : isDawn ? '#0d2040' : '#050c1a', 0.45));
+  // Teinte biome sur l'ambiance (légère)
+  const biomeAmb = { forêt:'#0a1a08', désert:'#1a1000', toundra:'#081020', marais:'#041408', montagne:'#080810', volcan:'#1a0400', jungle:'#031a03' };
+  canvas.drawRect(Skia.XYWHRect(0,0,W,H), mkAlpha(biomeAmb[biome]||'#080810', 0.30));
 
   // Champion suivi → fog of war
   const followed   = v.followId ? v.champions.find(c => c.id === v.followId && !c.isDead) : null;
   const visionW    = followed ? (followed.visionRadius || 12) : 999;
-  const visionSoft = 10; // marge de transition (unités monde)
+  const visionSoft = 28; // marge de transition douce (évite l'écran noir brutal)
 
   // ── Tiles + champions entrelacés (painter's algorithm iso) ───────────────
   const sortedTiles = sortedTilesRef || [];
@@ -468,7 +775,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
     // Insérer les champions dont la profondeur est <= profondeur de ce tile
     while (ci < champsWithDepth.length && champsWithDepth[ci].depth <= tile.depth) {
-      drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm);
+      drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs);
       ci++;
     }
 
@@ -478,75 +785,294 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       const tileWx = tile.gx * HM_CELL + HM_CELL / 2;
       const tileWy = tile.gy * HM_CELL + HM_CELL / 2;
       const dist   = Math.hypot(tileWx - followed.x, tileWy - followed.y);
-      fogA = dist > visionW ? Math.min(1, (dist - visionW) / visionSoft) : 0;
+      // Plafonné à 0.62 : jamais complètement noir, garde le contexte visible
+      fogA = dist > visionW ? Math.min(0.62, (dist - visionW) / visionSoft) : 0;
     }
 
-    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H);
+    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t);
   }
 
   // Champions restants (premier plan)
   while (ci < champsWithDepth.length) {
-    drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm);
+    drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs);
     ci++;
   }
+
+  // ── Obstacles visuels (zones de terrain dangereux) ────────────────────────
+  (v.obstacles || []).forEach(obs => {
+    const oh  = hm ? getElev(obs.x, obs.y, hm) : 1;
+    const { ix: oix, iy: oiy } = wToIso(obs.x, obs.y, oh);
+    const osx = W / 2 + (oix - camIx) * zoom;
+    const osy = H / 2 + (oiy - camIy) * zoom;
+    if (osx < -obs.radius * 60 || osx > W + obs.radius * 60) return;
+    const orW = (obs.radius / HM_CELL) * (TILE_W / 2) * zoom;
+    const orH = (obs.radius / HM_CELL) * (TILE_H / 2) * zoom;
+    if (orW < 2) return;
+
+    const OBSCFG = {
+      lava:      { col:'#cc2200', border:'#ff5500', pulse:true  },
+      swamp:     { col:'#1a3018', border:'#2a5828', pulse:false },
+      ice:       { col:'#90c8e8', border:'#c4e8ff', pulse:false },
+      quicksand: { col:'#c89840', border:'#e0b858', pulse:false },
+      rockfall:  { col:'#484848', border:'#686868', pulse:false },
+      ash:       { col:'#707070', border:'#909090', pulse:false },
+      thicket:   { col:'#1a2808', border:'#2a4010', pulse:false },
+    };
+    const ocfg  = OBSCFG[obs.type] || OBSCFG.rockfall;
+    const pulse = ocfg.pulse ? (0.72 + Math.sin(t * 3.2) * 0.28) : 1.0;
+
+    // Zone de fond (ellipse iso)
+    _ep.rewind();
+    _ep.addOval(Skia.XYWHRect(osx - orW, osy - orH, orW * 2, orH * 2));
+    canvas.drawPath(_ep, mkAlpha(ocfg.col, 0.30 * pulse));
+    canvas.drawPath(_ep, mkStrokeA(ocfg.border, Math.max(1.2, zoom * 0.7), 0.60 * pulse));
+
+    // Décoration spécifique au type
+    if (obs.type === 'lava') {
+      canvas.drawCircle(osx, osy, orW * 0.32, mkAlpha('#ff4400', 0.38 * pulse));
+      canvas.drawCircle(osx, osy, orW * 0.14, mkAlpha('#ffaa00', 0.58 * pulse));
+      // Fissures (rayons)
+      for (let ci2 = 0; ci2 < 5; ci2++) {
+        const ang = (ci2 / 5) * Math.PI * 2 + t * 0.8;
+        const cr = orW * (0.18 + Math.sin(t * 2.5 + ci2) * 0.08);
+        _ep.rewind();
+        _ep.moveTo(osx, osy);
+        _ep.lineTo(osx + Math.cos(ang) * cr, osy + Math.sin(ang) * orH / orW * cr);
+        canvas.drawPath(_ep, mkStrokeA('#ff6600', Math.max(1, zoom * 0.8), 0.55 * pulse));
+      }
+    } else if (obs.type === 'ice') {
+      // Cristaux (6 rayons)
+      const iceP = Skia.Path.Make();
+      for (let ii = 0; ii < 6; ii++) {
+        const a = (ii / 6) * Math.PI * 2;
+        iceP.moveTo(osx, osy);
+        iceP.lineTo(osx + Math.cos(a) * orW * 0.65, osy + Math.sin(a) * orH * 0.65);
+      }
+      canvas.drawPath(iceP, mkStrokeA('#c8e8f8', Math.max(1.2, zoom * 0.8), 0.65));
+      canvas.drawCircle(osx, osy, orW * 0.18, mkAlpha('#e8f8ff', 0.70));
+    } else if (obs.type === 'quicksand') {
+      // Spirale animée
+      const spP = Skia.Path.Make();
+      let first = true;
+      for (let si = 0; si < 30; si++) {
+        const ang = (si / 6) * Math.PI * 2 + t * 1.8;
+        const sr  = orW * (0.06 + si / 30 * 0.60);
+        const px  = osx + Math.cos(ang) * sr;
+        const py  = osy + Math.sin(ang) * sr * (orH / orW);
+        if (first) { spP.moveTo(px, py); first = false; } else spP.lineTo(px, py);
+      }
+      canvas.drawPath(spP, mkStrokeA('#c89840', Math.max(0.8, zoom * 0.55), 0.55));
+    } else if (obs.type === 'swamp') {
+      // Bulles remontantes animées
+      for (let bi = 0; bi < 5; bi++) {
+        const bseed = _tileRng(Math.floor(obs.x * 3), Math.floor(obs.y * 3), bi);
+        const bang  = bseed * Math.PI * 2;
+        const bphase = ((t * 0.55 + bseed) % 1.0);
+        const br    = orW * 0.065 * (1 - bphase);
+        if (br < 0.5) continue;
+        canvas.drawCircle(
+          osx + Math.cos(bang) * orW * 0.40,
+          osy + Math.sin(bang) * orH * 0.40,
+          Math.max(1, br), mkAlpha('#2a5028', (1 - bphase) * 0.72)
+        );
+      }
+    } else if (obs.type === 'thicket') {
+      // Épines (×)
+      for (let ti2 = 0; ti2 < 4; ti2++) {
+        const tang = (ti2 / 4) * Math.PI * 2;
+        const tx2 = osx + Math.cos(tang) * orW * 0.42;
+        const ty2 = osy + Math.sin(tang) * orH * 0.42;
+        const ts = orW * 0.12;
+        const tp = Skia.Path.Make();
+        tp.moveTo(tx2 - ts, ty2 - ts); tp.lineTo(tx2 + ts, ty2 + ts);
+        tp.moveTo(tx2 + ts, ty2 - ts); tp.lineTo(tx2 - ts, ty2 + ts);
+        canvas.drawPath(tp, mkStrokeA('#2a4010', Math.max(1.2, zoom * 0.8), 0.65));
+      }
+    }
+  });
 
   // ── Colis (supply drops + loots avec animation de chute) ─────────────────
   const WEAPON_COLORS = { sword:'#bdc3c7', spear:'#95a5a6', bow:'#8e44ad', shield:'#7f8c8d' };
   const allDrops = [...(v.supplies || []), ...(v.loots || [])];
   allDrops.forEach(s => {
     const sh   = hm ? getElev(s.x, s.y, hm) : 1;
-    // Animation de chute : if _dropTick and tick, compute fall offset
+    // Animation de chute étendue (20 ticks, départ haut dans le ciel)
     const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
-    const fallH    = tickDiff < 6 ? Math.max(0, sh + 5 - tickDiff * 1.2) : sh + 0.6;
+    const falling  = tickDiff < 20;
+    const fallH    = falling ? Math.max(0, sh + 20 - tickDiff * 1.0) : sh + 0.6;
     const { ix, iy } = wToIso(s.x, s.y, fallH);
     const sx2 = W / 2 + (ix - camIx) * zoom;
     const sy2 = H / 2 + (iy - camIy) * zoom;
-    if (sx2 < -20 || sx2 > W+20 || sy2 < -20 || sy2 > H+20) return;
+    if (sx2 < -40 || sx2 > W+40 || sy2 < -80 || sy2 > H+40) return;
     const col = WEAPON_COLORS[s.type] || SUPPLY_COLORS[s.type] || '#ffffff';
     const r2  = Math.max(3, zoom * 1.8);
-    const isWeapon = !!WEAPON_COLORS[s.type];
 
-    // Ombre portée (chute)
-    if (tickDiff < 6 && fallH > sh + 0.8) {
-      const shh = hm ? getElev(s.x, s.y, hm) : 1;
-      const { ix:six2, iy:siy2 } = wToIso(s.x, s.y, shh);
+    // Ombre portée au sol (s'agrandit pendant la chute)
+    if (falling && fallH > sh + 0.5) {
+      const { ix:six2, iy:siy2 } = wToIso(s.x, s.y, sh + 0.3);
       const shdx = W/2 + (six2 - camIx) * zoom;
       const shdy = H/2 + (siy2 - camIy) * zoom;
-      const shadowA = Math.max(0.05, 0.4 - tickDiff * 0.06);
-      canvas.drawCircle(shdx, shdy, r2 * (1 + tickDiff * 0.4), mkAlpha('#000000', shadowA));
+      const fallProgress = tickDiff / 20;
+      const shadowA = (1 - fallProgress) * 0.25;
+      canvas.drawCircle(shdx, shdy, r2 * (1 + (1 - fallProgress) * 3.0), mkAlpha('#000000', shadowA));
+    }
+
+    // ── Parachute (pendant la chute) ────────────────────────────────────────
+    if (falling && fallH > sh + 0.8) {
+      const pdR  = r2 * 3.2 * (1 - tickDiff / 22);  // se referme à l'atterrissage
+      const pdx  = sx2;
+      const pdy  = sy2 - pdR * 1.6;
+      // Dôme (demi-ellipse via cubic bezier)
+      const chutePath = Skia.Path.Make();
+      chutePath.moveTo(pdx - pdR, pdy);
+      chutePath.cubicTo(pdx - pdR, pdy - pdR * 1.0, pdx + pdR, pdy - pdR * 1.0, pdx + pdR, pdy);
+      chutePath.close();
+      canvas.drawPath(chutePath, mkAlpha(col, 0.68));
+      canvas.drawPath(chutePath, mkStrokeA('#ffffff', Math.max(0.8, zoom * 0.45), 0.55));
+      // Segments alternés (bandes du parachute)
+      for (let si = 0; si < 4; si++) {
+        const a1 = Math.PI + (si / 4) * Math.PI;
+        const a2 = Math.PI + ((si + 0.88) / 4) * Math.PI;
+        const segP = Skia.Path.Make();
+        segP.moveTo(pdx + Math.cos(a1) * pdR, pdy + Math.sin(a1) * pdR * 0.5);
+        segP.lineTo(pdx + Math.cos(a2) * pdR, pdy + Math.sin(a2) * pdR * 0.5);
+        segP.lineTo(pdx, pdy);
+        segP.close();
+        canvas.drawPath(segP, mkAlpha(si % 2 === 0 ? '#ffffff' : col, 0.25));
+      }
+      // Cordes (3 fils du dôme vers le colis)
+      const ropeY = pdy + pdR * 0.05;
+      [-0.55, 0, 0.55].forEach(rx => {
+        const rp3 = Skia.Path.Make();
+        rp3.moveTo(pdx + pdR * rx, ropeY);
+        rp3.lineTo(sx2, sy2);
+        canvas.drawPath(rp3, mkStrokeA('#d0c898', Math.max(0.5, zoom * 0.32), 0.62));
+      });
     }
 
     // Halo coloré
-    canvas.drawCircle(sx2, sy2, r2 * 3.2, mkAlpha(col, 0.20));
+    canvas.drawCircle(sx2, sy2, r2 * 3.0, mkAlpha(col, 0.18));
 
-    if (isWeapon) {
-      // Arme : losange avec croix centrale
-      canvas.save();
-      canvas.translate(sx2, sy2);
+    // ── Sprite distinct par type ─────────────────────────────────────────────
+    canvas.save();
+    canvas.translate(sx2, sy2);
+
+    if (s.type === 'sword') {
+      // Épée : lame effilée + garde + poignée
+      canvas.rotate(t * 15);
+      const blade = Skia.Path.Make();
+      blade.moveTo(0, -r2*3.5); blade.lineTo(r2*0.5, -r2*0.6); blade.lineTo(-r2*0.5, -r2*0.6); blade.close();
+      canvas.drawPath(blade, mkAlpha('#d8d8e8', 0.92));
+      canvas.drawPath(blade, mkStrokeA('#9090a0', Math.max(0.6, zoom*0.4), 0.55));
+      canvas.drawRect(Skia.XYWHRect(-r2*1.3, -r2*0.9, r2*2.6, r2*0.55), mkAlpha('#a06010', 0.90)); // garde
+      canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*0.5, r2*0.56, r2*1.25), mkAlpha('#8a6020', 0.92)); // poignée
+    } else if (s.type === 'spear') {
+      // Lance : hampe longue + fer de lance
+      canvas.rotate(t * 12 + 40);
+      canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*3.6, r2*0.56, r2*3.8), mkAlpha('#8a6030', 0.90));
+      const tip = Skia.Path.Make();
+      tip.moveTo(0, -r2*5.0); tip.lineTo(r2*0.65, -r2*3.6); tip.lineTo(-r2*0.65, -r2*3.6); tip.close();
+      canvas.drawPath(tip, mkAlpha('#c8d0d8', 0.94));
+    } else if (s.type === 'bow') {
+      // Arc : courbe + corde
+      canvas.rotate(t * 10 + 25);
+      const arc = Skia.Path.Make();
+      arc.moveTo(-r2*0.9, -r2*2.4);
+      arc.cubicTo(-r2*3.0, -r2*1.0, -r2*3.0, r2*1.0, -r2*0.9, r2*2.4);
+      canvas.drawPath(arc, mkStrokeA('#8a6030', Math.max(1.8, zoom*1.1), 0.92));
+      const str = Skia.Path.Make();
+      str.moveTo(-r2*0.9, -r2*2.4); str.lineTo(r2*1.1, 0); str.lineTo(-r2*0.9, r2*2.4);
+      canvas.drawPath(str, mkStrokeA('#d8c890', Math.max(0.7, zoom*0.45), 0.78));
+    } else if (s.type === 'shield') {
+      // Bouclier : ovale allongé
+      const shP = Skia.Path.Make();
+      shP.moveTo(0,  r2*2.4);
+      shP.cubicTo( r2*1.9, r2*1.2,  r2*1.9, -r2*1.2, 0, -r2*2.4);
+      shP.cubicTo(-r2*1.9, -r2*1.2, -r2*1.9,  r2*1.2, 0,  r2*2.4);
+      shP.close();
+      canvas.drawPath(shP, mkAlpha('#7a5820', 0.90));
+      canvas.drawPath(shP, mkStrokeA('#c8a840', Math.max(1, zoom*0.75), 0.82));
+      canvas.drawCircle(0, 0, r2*0.58, mkAlpha('#c8a840', 0.78));
+    } else if (s.type === 'soin') {
+      // Croix médicale verte
       canvas.rotate(t * 18);
-      const dp = Skia.Path.Make();
-      dp.moveTo(0, -r2*1.4); dp.lineTo(r2*1.4, 0); dp.lineTo(0, r2*1.4); dp.lineTo(-r2*1.4, 0); dp.close();
-      canvas.drawPath(dp, mkAlpha(col, 0.90));
-      canvas.restore();
-      canvas.drawCircle(sx2, sy2, r2 * 0.55, mkAlpha('#ffffff', 0.55));
+      canvas.drawRect(Skia.XYWHRect(-r2*2.0, -r2*0.68, r2*4.0, r2*1.36), mkAlpha('#27ae60', 0.94));
+      canvas.drawRect(Skia.XYWHRect(-r2*0.68, -r2*2.0, r2*1.36, r2*4.0), mkAlpha('#27ae60', 0.94));
+      canvas.drawRect(Skia.XYWHRect(-r2*1.8, -r2*0.45, r2*3.6, r2*0.90), mkAlpha('#ffffff', 0.28));
+    } else if (s.type === 'force') {
+      // Haltère rouge
+      canvas.rotate(t * 20 + 90);
+      canvas.drawCircle(-r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
+      canvas.drawCircle( r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
+      canvas.drawRect(Skia.XYWHRect(-r2*1.6, -r2*0.42, r2*3.2, r2*0.84), mkAlpha('#c0392b', 0.90));
+    } else if (s.type === 'vitesse') {
+      // Éclair jaune
+      canvas.rotate(t * 22);
+      const bolt = Skia.Path.Make();
+      bolt.moveTo( r2*0.65, -r2*2.3); bolt.lineTo(-r2*0.42, -r2*0.2); bolt.lineTo( r2*0.85, -r2*0.2);
+      bolt.lineTo(-r2*0.65,  r2*2.3); bolt.lineTo( r2*0.42,  r2*0.4); bolt.lineTo(-r2*0.85,  r2*0.4);
+      bolt.close();
+      canvas.drawPath(bolt, mkAlpha('#f1c40f', 0.94));
+      canvas.drawPath(bolt, mkStrokeA('#3498db', Math.max(0.7, zoom*0.38), 0.55));
+    } else if (s.type === 'armure') {
+      // Hexagone gris métallique
+      const hex = Skia.Path.Make();
+      for (let hi = 0; hi < 6; hi++) {
+        const a = hi * Math.PI / 3 + (t * 6 * Math.PI / 180);
+        if (hi === 0) hex.moveTo(Math.cos(a)*r2*2.1, Math.sin(a)*r2*2.1);
+        else          hex.lineTo(Math.cos(a)*r2*2.1, Math.sin(a)*r2*2.1);
+      }
+      hex.close();
+      canvas.drawPath(hex, mkAlpha('#95a5a6', 0.90));
+      canvas.drawPath(hex, mkStrokeA('#7f8c8d', Math.max(1, zoom*0.7), 0.82));
+      canvas.drawCircle(0, 0, r2*0.72, mkAlpha('#dfe6e9', 0.65));
+    } else if (s.type === 'festin') {
+      // Assiette avec bouchées
+      canvas.drawCircle(0, 0, r2*2.1, mkAlpha('#ff9f43', 0.88));
+      canvas.drawCircle(0, 0, r2*1.45, mkAlpha('#ffd39b', 0.72));
+      [[-0.72,-0.40],[0.72,-0.40],[0,0.72]].forEach(([px,py]) => {
+        canvas.drawCircle(r2*px, r2*py, r2*0.40, mkAlpha('#e17055', 0.88));
+      });
+    } else if (s.type === 'adrenaline') {
+      // Cœur rouge pulsant
+      const hbeat = 1.0 + Math.sin(t * 5.5) * 0.18;
+      const hs = r2 * 1.65 * hbeat;
+      const heart = Skia.Path.Make();
+      heart.moveTo(0, hs * 0.55);
+      heart.cubicTo(-hs*0.04, hs*0.12, -hs*1.05, -hs*0.48, 0, -hs*1.05);
+      heart.cubicTo( hs*1.05, -hs*0.48,  hs*0.04,  hs*0.12, 0,  hs*0.55);
+      canvas.drawPath(heart, mkAlpha('#e74c3c', 0.92));
+    } else if (s.type === 'camouflage') {
+      // Silhouette fantôme (dégradé de transparence)
+      canvas.drawCircle(0, 0, r2*2.2, mkAlpha('#6ab04c', 0.22));
+      canvas.drawCircle(0, 0, r2*1.3, mkAlpha('#6ab04c', 0.48));
+      canvas.drawCircle(0, 0, r2*0.55, mkAlpha('#6ab04c', 0.80));
+    } else if (s.type === 'carte') {
+      // Carte dépliée
+      canvas.rotate(t * 14);
+      canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkAlpha('#f9ca24', 0.92));
+      canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkStrokeA('#8a7010', Math.max(0.8, zoom*0.5), 0.80));
+      for (let li = 0; li < 3; li++) {
+        const ly = -r2*(1.5 - li * 0.9);
+        canvas.drawRect(Skia.XYWHRect(-r2*1.2, ly, r2*2.4, r2*0.38), mkAlpha('#8a7010', 0.38));
+      }
     } else {
-      // Colis classique : diamant
-      canvas.save();
-      canvas.translate(sx2, sy2);
-      canvas.rotate(t * 24);
+      // Fallback générique : diamant tournant
+      canvas.rotate(t * 20);
       const dp = Skia.Path.Make();
       dp.moveTo(0, -r2); dp.lineTo(r2, 0); dp.lineTo(0, r2); dp.lineTo(-r2, 0); dp.close();
       canvas.drawPath(dp, mkFill(col));
-      canvas.restore();
     }
 
-    // Ligne de descente (loot en chute)
-    if (tickDiff < 4 && fallH > sh + 1) {
+    canvas.restore();
+
+    // Ligne de descente (loot en chute, avant atterrissage)
+    if (falling && fallH > sh + 1) {
       const { ix:grix, iy:griy } = wToIso(s.x, s.y, sh + 0.6);
       const grsx = W/2 + (grix - camIx)*zoom, grsy = H/2 + (griy - camIy)*zoom;
       const lineP = Skia.Path.Make();
       lineP.moveTo(sx2, sy2); lineP.lineTo(grsx, grsy);
-      canvas.drawPath(lineP, mkStrokeA(col, 1.2, 0.35));
+      canvas.drawPath(lineP, mkStrokeA(col, 1.0, 0.28));
     }
   });
 
@@ -581,20 +1107,246 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     canvas.drawCircle(fsx, fsy, fGlow * 0.3, mkAlpha('#ffcc44', 0.30 * fPulse));
   }
 
-  // ── Faune (points animés sur la carte) ────────────────────────────────────
-  const FAUNA_COLORS = { deer:'#c0a040', wolf:'#6e4020', rabbit:'#d0c080', boar:'#6a3a20' };
+  // ── Faune — sprites distincts par espèce ─────────────────────────────────
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
-    const fh = hm ? getElev(f.x, f.y, hm) : 1;
-    const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.2);
+    const fh  = hm ? getElev(f.x, f.y, hm) : 1;
+    const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.3);
     const fsx = W/2 + (fix - camIx) * zoom;
     const fsy = H/2 + (fiy - camIy) * zoom;
-    if (fsx < -10 || fsx > W+10 || fsy < -10 || fsy > H+10) return;
-    const fc = FAUNA_COLORS[f.type] || '#888844';
-    const fr = Math.max(2, zoom * 1.1);
-    const bob = Math.sin(t * 3 + f.id.length) * 1.5;
-    canvas.drawCircle(fsx, fsy + bob, fr * 1.8, mkAlpha(fc, 0.18));
-    canvas.drawCircle(fsx, fsy + bob, fr, mkFill(fc));
+    if (fsx < -40 || fsx > W+40 || fsy < -40 || fsy > H+40) return;
+
+    const fr   = Math.max(4.5, zoom * 2.4);
+    const idN  = f.id ? (f.id.charCodeAt(f.id.length-1) || f.id.charCodeAt(0) || 0) : 0;
+    const bob  = Math.sin(t * 2.8 + idN * 0.7) * 1.8;
+
+    // Ombre au sol (commune)
+    canvas.drawCircle(fsx + 1.2, fsy + bob + fr * 0.9, fr * 1.3, mkAlpha('#000000', 0.20));
+
+    if (f.type === 'deer') {
+      // ── Cerf : svelte, tawny, ramure ──────────────────────────────────
+      const dk='#6a4010', dc='#d4a84b', lt='#f0c870';
+      // Corps (2 lobes)
+      canvas.drawCircle(fsx-fr*0.45, fsy+bob,       fr*1.28, mkAlpha(dk,0.92));
+      canvas.drawCircle(fsx-fr*0.45, fsy+bob,       fr*1.05, mkAlpha(dc,0.95));
+      canvas.drawCircle(fsx+fr*0.4,  fsy+bob-fr*.1, fr*1.12, mkAlpha(dk,0.92));
+      canvas.drawCircle(fsx+fr*0.4,  fsy+bob-fr*.1, fr*0.90, mkAlpha(dc,0.95));
+      canvas.drawCircle(fsx,         fsy+bob+fr*.2,  fr*0.45, mkAlpha(lt,0.50)); // ventre
+      // Cou
+      canvas.drawCircle(fsx+fr*0.9,  fsy+bob-fr*.6, fr*0.55, mkAlpha(dk,0.90));
+      canvas.drawCircle(fsx+fr*0.9,  fsy+bob-fr*.6, fr*0.40, mkAlpha(dc,0.95));
+      // Tête
+      const hx=fsx+fr*1.5, hy=fsy+bob-fr*1.2;
+      canvas.drawCircle(hx,       hy,        fr*0.76, mkAlpha(dk,0.92));
+      canvas.drawCircle(hx,       hy,        fr*0.58, mkAlpha(dc,0.98));
+      canvas.drawCircle(hx+fr*.3, hy+fr*.18, fr*0.36, mkAlpha(dk,0.85)); // museau
+      canvas.drawCircle(hx+fr*.3, hy+fr*.18, fr*0.24, mkAlpha('#c09040',0.92));
+      canvas.drawCircle(hx+fr*.15, hy-fr*.1,  fr*0.16, mkAlpha('#000',0.90)); // œil
+      canvas.drawCircle(hx+fr*.13, hy-fr*.12, fr*0.07, mkAlpha('#fff',0.65));
+      // Oreille
+      canvas.drawCircle(hx-fr*.12, hy-fr*.5, fr*0.28, mkAlpha(dk,0.88));
+      canvas.drawCircle(hx-fr*.12, hy-fr*.5, fr*0.17, mkAlpha('#d0886a',0.80));
+      // Ramure — 2 branches en Y
+      const ap=Skia.Path.Make(), ax=hx-fr*.05, ay=hy-fr*.62;
+      ap.moveTo(ax-fr*.18,ay); ap.lineTo(ax-fr*.58,ay-fr*.95);
+      ap.moveTo(ax-fr*.52,ay-fr*.65); ap.lineTo(ax-fr*.95,ay-fr*.45);
+      ap.moveTo(ax+fr*.18,ay); ap.lineTo(ax+fr*.5,ay-fr*.88);
+      ap.moveTo(ax+fr*.44,ay-fr*.58); ap.lineTo(ax+fr*.82,ay-fr*.32);
+      canvas.drawPath(ap, mkStrokeA(dk, Math.max(0.8,fr*0.20), 0.92));
+      // Pattes (4 points)
+      const ly=fsy+bob+fr*1.52;
+      [-0.65,-0.22,0.22,0.65].forEach(lx=>canvas.drawCircle(fsx+fr*lx,ly,fr*0.17,mkAlpha(dk,0.78)));
+
+    } else if (f.type === 'rabbit') {
+      // ── Lapin : petit, rond, grandes oreilles ─────────────────────────
+      const rk='#806848', rc='#ece8c0', rl='#f8f4e0', rp='#f0a0a0';
+      const rs=fr*0.68; // plus petit
+      // Corps (très rond)
+      canvas.drawCircle(fsx,      fsy+bob,       rs*1.18, mkAlpha(rk,0.88));
+      canvas.drawCircle(fsx,      fsy+bob,       rs,      mkAlpha(rc,0.96));
+      canvas.drawCircle(fsx+rs*.1,fsy+bob+rs*.2, rs*0.55, mkAlpha(rl,0.55)); // ventre
+      // Tête
+      const rhx=fsx+rs*.82, rhy=fsy+bob-rs*.52;
+      canvas.drawCircle(rhx, rhy, rs*0.76, mkAlpha(rk,0.88));
+      canvas.drawCircle(rhx, rhy, rs*0.60, mkAlpha(rc,0.96));
+      // Oreilles (colonnes de cercles)
+      const e1x=fsx+rs*.35, e2x=fsx+rs*.85;
+      [-1.1,-0.65,-0.2].forEach(yo => {
+        const ey=fsy+bob-rs*1.55+rs*yo*0;
+        canvas.drawCircle(e1x, fsy+bob-rs*(1.5-yo*0.45), rs*0.26, mkAlpha(rk,0.85));
+        canvas.drawCircle(e1x, fsy+bob-rs*(1.5-yo*0.45), rs*0.17, mkAlpha(rc,0.96));
+        canvas.drawCircle(e2x, fsy+bob-rs*(1.5-yo*0.45), rs*0.26, mkAlpha(rk,0.85));
+        canvas.drawCircle(e2x, fsy+bob-rs*(1.5-yo*0.45), rs*0.17, mkAlpha(rc,0.96));
+      });
+      canvas.drawCircle(e1x, fsy+bob-rs*2.2, rs*0.12, mkAlpha(rp,0.72)); // intérieur rose
+      canvas.drawCircle(e2x, fsy+bob-rs*2.2, rs*0.12, mkAlpha(rp,0.72));
+      // Museau + nez rose
+      canvas.drawCircle(rhx+rs*.6, rhy+rs*.05, rs*0.20, mkAlpha(rk,0.78));
+      canvas.drawCircle(rhx+rs*.6, rhy+rs*.05, rs*0.10, mkAlpha(rp,0.90));
+      // Œil
+      canvas.drawCircle(rhx+rs*.12, rhy-rs*.15, rs*0.15, mkAlpha('#000',0.90));
+      canvas.drawCircle(rhx+rs*.10, rhy-rs*.17, rs*0.06, mkAlpha('#fff',0.65));
+      // Queue (derrière)
+      canvas.drawCircle(fsx-rs*.88, fsy+bob-rs*.18, rs*0.26, mkAlpha(rk,0.68));
+      canvas.drawCircle(fsx-rs*.88, fsy+bob-rs*.18, rs*0.17, mkAlpha(rl,0.90));
+
+    } else if (f.type === 'wolf') {
+      // ── Loup : élancé, sombre, yeux ambrés ────────────────────────────
+      const wk='#283030', wc='#7a8c8a', wl='#a8c0b8';
+      // Corps allongé (3 cercles)
+      canvas.drawCircle(fsx-fr*.9,  fsy+bob+fr*.1,  fr*1.12, mkAlpha(wk,0.90));
+      canvas.drawCircle(fsx-fr*.9,  fsy+bob+fr*.1,  fr*0.90, mkAlpha(wc,0.95));
+      canvas.drawCircle(fsx,        fsy+bob-fr*.05, fr*0.98, mkAlpha(wk,0.90));
+      canvas.drawCircle(fsx,        fsy+bob-fr*.05, fr*0.78, mkAlpha(wc,0.95));
+      canvas.drawCircle(fsx+fr*.8,  fsy+bob-fr*.1,  fr*0.88, mkAlpha(wk,0.90));
+      canvas.drawCircle(fsx+fr*.8,  fsy+bob-fr*.1,  fr*0.70, mkAlpha(wc,0.95));
+      canvas.drawCircle(fsx-fr*.1,  fsy+bob+fr*.28, fr*0.50, mkAlpha(wl,0.30)); // ventre
+      // Queue (relevée)
+      canvas.drawCircle(fsx-fr*1.75,fsy+bob-fr*.45, fr*0.52, mkAlpha(wk,0.86));
+      canvas.drawCircle(fsx-fr*1.75,fsy+bob-fr*.45, fr*0.36, mkAlpha(wc,0.92));
+      canvas.drawCircle(fsx-fr*1.92,fsy+bob-fr*.88, fr*0.32, mkAlpha(wk,0.78));
+      canvas.drawCircle(fsx-fr*1.92,fsy+bob-fr*.88, fr*0.20, mkAlpha('#ccd8d0',0.88));
+      // Tête
+      const hwx=fsx+fr*1.52, hwy=fsy+bob-fr*.78;
+      canvas.drawCircle(hwx,        hwy,        fr*0.80, mkAlpha(wk,0.90));
+      canvas.drawCircle(hwx,        hwy,        fr*0.63, mkAlpha(wc,0.96));
+      // Museau long
+      canvas.drawCircle(hwx+fr*.58, hwy+fr*.22, fr*0.48, mkAlpha(wk,0.88));
+      canvas.drawCircle(hwx+fr*.58, hwy+fr*.22, fr*0.34, mkAlpha('#6a8070',0.92));
+      canvas.drawCircle(hwx+fr*.98, hwy+fr*.26, fr*0.15, mkAlpha('#181818',0.95)); // nez
+      // Oreilles pointues
+      canvas.drawCircle(hwx-fr*.28, hwy-fr*.78, fr*0.33, mkAlpha(wk,0.92));
+      canvas.drawCircle(hwx-fr*.28, hwy-fr*.78, fr*0.17, mkAlpha('#c87070',0.72));
+      canvas.drawCircle(hwx+fr*.14, hwy-fr*.82, fr*0.28, mkAlpha(wk,0.88));
+      canvas.drawCircle(hwx+fr*.14, hwy-fr*.82, fr*0.13, mkAlpha('#c87070',0.68));
+      // Œil ambre
+      canvas.drawCircle(hwx+fr*.22, hwy-fr*.14, fr*0.19, mkAlpha('#000',0.85));
+      canvas.drawCircle(hwx+fr*.22, hwy-fr*.14, fr*0.12, mkAlpha('#d8a820',0.90));
+      canvas.drawCircle(hwx+fr*.24, hwy-fr*.16, fr*0.05, mkAlpha('#000',0.95));
+      // Pattes
+      const wly=fsy+bob+fr*1.28;
+      [-0.75,-0.28,0.18,0.62].forEach(lx=>canvas.drawCircle(fsx+fr*lx,wly,fr*0.16,mkAlpha(wk,0.75)));
+
+    } else if (f.type === 'boar') {
+      // ── Sanglier : trapu, sombre, défenses ivoire ─────────────────────
+      const bk='#2a1008', bc='#6a4020', bl='#8a5838', iv='#f0e8c0';
+      // Corps large et bas
+      canvas.drawCircle(fsx-fr*.28, fsy+bob+fr*.18, fr*1.52, mkAlpha(bk,0.92));
+      canvas.drawCircle(fsx-fr*.28, fsy+bob+fr*.18, fr*1.25, mkAlpha(bc,0.96));
+      canvas.drawCircle(fsx-fr*.28, fsy+bob-fr*.28, fr*0.75, mkAlpha('#1a0804',0.32)); // soies dos
+      // Tête massive
+      const bhx=fsx+fr*1.08, bhy=fsy+bob-fr*.2;
+      canvas.drawCircle(bhx,        bhy,        fr*1.08, mkAlpha(bk,0.92));
+      canvas.drawCircle(bhx,        bhy,        fr*0.88, mkAlpha(bc,0.96));
+      canvas.drawCircle(bhx,        bhy,        fr*0.58, mkAlpha(bl,0.38)); // reflet
+      // Groin
+      canvas.drawCircle(bhx+fr*.78, bhy+fr*.28, fr*0.52, mkAlpha(bk,0.90));
+      canvas.drawCircle(bhx+fr*.78, bhy+fr*.28, fr*0.38, mkAlpha('#5a3018',0.95));
+      canvas.drawCircle(bhx+fr*1.16,bhy+fr*.16, fr*0.13, mkAlpha('#180808',0.90)); // naseaux
+      canvas.drawCircle(bhx+fr*1.16,bhy+fr*.34, fr*0.12, mkAlpha('#180808',0.90));
+      // Défenses ivoire
+      canvas.drawCircle(bhx+fr*.88, bhy+fr*.68, fr*0.24, mkAlpha(iv,0.92));
+      canvas.drawCircle(bhx+fr*1.08,bhy+fr*.70, fr*0.19, mkAlpha(iv,0.92));
+      // Œil rouge-sombre
+      canvas.drawCircle(bhx+fr*.28, bhy-fr*.24, fr*0.17, mkAlpha('#180000',0.95));
+      canvas.drawCircle(bhx+fr*.26, bhy-fr*.26, fr*0.07, mkAlpha('#c03000',0.78));
+      // Petites oreilles
+      canvas.drawCircle(bhx-fr*.22, bhy-fr*.82, fr*0.28, mkAlpha(bk,0.88));
+      canvas.drawCircle(bhx-fr*.22, bhy-fr*.82, fr*0.15, mkAlpha('#8a3828',0.78));
+      // Pattes courtes
+      const bly=fsy+bob+fr*1.75;
+      [-0.58,-0.18,0.22,0.62].forEach(lx=>canvas.drawCircle(fsx+fr*lx,bly,fr*0.21,mkAlpha(bk,0.82)));
+    }
+
+    // HP bar si blessé
+    if (f.hp != null && f.maxHp != null && f.hp < f.maxHp && zoom > 1.2) {
+      const barW=fr*5.5, barH=Math.max(2,zoom*1.2), bx=fsx-barW/2, by=fsy+bob-fr*3.4;
+      canvas.drawRect(Skia.XYWHRect(bx-0.5,by-0.5,barW+1,barH+1), mkAlpha('#000000',0.70));
+      canvas.drawRect(Skia.XYWHRect(bx,by,barW,barH), mkAlpha('#330000',0.80));
+      canvas.drawRect(Skia.XYWHRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),barH), mkFill('#ff3030'));
+    }
+  });
+
+  // ── Flore (ressources bien visibles sur la carte) ─────────────────────────
+  const FLORA_CFG = {
+    berries:     { out:'#600030', body:'#c02860', bright:'#ff60a8', shine:'#ffc0d8' },
+    herbs:       { out:'#083808', body:'#228a28', bright:'#44cc44', shine:'#a0f0a0' },
+    mushroom:    { out:'#3a1c00', body:'#b85c10', bright:'#e88828', shine:'#ffc870' },
+    waterSource: { out:'#001858', body:'#1060c8', bright:'#40a8ff', shine:'#a0d8ff' },
+    poisonPlant: { out:'#1a1800', body:'#686000', bright:'#b0a800', shine:'#e0d840' },
+  };
+  (v.flora || []).forEach(fl => {
+    if (fl.collected) return;
+    const flh  = hm ? getElev(fl.x, fl.y, hm) : 1;
+    const { ix:flix, iy:fliy } = wToIso(fl.x, fl.y, flh + 0.2);
+    const flsx = W/2 + (flix - camIx) * zoom;
+    const flsy = H/2 + (fliy - camIy) * zoom;
+    if (flsx < -18 || flsx > W+18 || flsy < -18 || flsy > H+18) return;
+    const cfg  = FLORA_CFG[fl.type] || { out:'#203010', body:'#507020', bright:'#80b040', shine:'#c0e880' };
+    const fr2  = Math.max(4.5, zoom * 2.2);   // bien plus grand
+    const idSeed = fl.id ? (fl.id.charCodeAt(5) || fl.id.charCodeAt(0) || 0) : 0;
+    const sway   = Math.sin(t * 1.8 + idSeed) * 1.8;
+    const gpulse = 0.82 + Math.sin(t * 2.2 + idSeed * 0.1) * 0.18;
+
+    // Halo de distance (aide à repérer la ressource)
+    canvas.drawCircle(flsx + sway, flsy, fr2 * 3.8, mkAlpha(cfg.bright, 0.12 * gpulse));
+
+    // Ombre portée
+    canvas.drawCircle(flsx + sway + 1, flsy + fr2 * 0.9, fr2 * 1.4, mkAlpha('#000000', 0.28));
+
+    if (fl.type === 'mushroom') {
+      // ── Champignon : pied + chapeau arrondi ─────────────────────────────
+      // Pied (contour + corps)
+      canvas.drawCircle(flsx + sway, flsy + fr2*0.3, fr2 * 0.65, mkAlpha(cfg.out, 0.90));
+      canvas.drawCircle(flsx + sway, flsy + fr2*0.3, fr2 * 0.45, mkAlpha('#f0e8c0', 0.92));
+      // Chapeau (contour puis couleur)
+      canvas.drawCircle(flsx + sway, flsy - fr2*0.4, fr2 * 1.45, mkAlpha(cfg.out, 0.95));
+      canvas.drawCircle(flsx + sway, flsy - fr2*0.4, fr2 * 1.20, mkAlpha(cfg.body, 0.95));
+      // Tâches blanches
+      canvas.drawCircle(flsx + sway - fr2*0.38, flsy - fr2*0.6, fr2 * 0.22, mkAlpha('#ffffff', 0.80));
+      canvas.drawCircle(flsx + sway + fr2*0.28, flsy - fr2*0.72, fr2 * 0.15, mkAlpha('#ffffff', 0.70));
+      canvas.drawCircle(flsx + sway - fr2*0.1,  flsy - fr2*0.25, fr2 * 0.12, mkAlpha('#ffffff', 0.65));
+    } else if (fl.type === 'berries') {
+      // ── Baies : tige + 3 petites baies rondes ────────────────────────────
+      // Tige (contour + intérieur)
+      canvas.drawCircle(flsx + sway, flsy, fr2 * 1.1, mkAlpha(cfg.out, 0.95));
+      canvas.drawCircle(flsx + sway, flsy, fr2 * 0.85, mkAlpha('#3a5a20', 0.90));
+      // Baies (contour noir + couleur vive)
+      const bpos = [[-0.65,-0.55],[0.65,-0.55],[0,-0.95]];
+      bpos.forEach(([bx,by]) => {
+        canvas.drawCircle(flsx+sway+fr2*bx, flsy+fr2*by, fr2*0.52, mkAlpha(cfg.out, 0.95));
+        canvas.drawCircle(flsx+sway+fr2*bx, flsy+fr2*by, fr2*0.38, mkAlpha(cfg.bright, 0.95));
+        canvas.drawCircle(flsx+sway+fr2*(bx-0.1), flsy+fr2*(by-0.1), fr2*0.12, mkAlpha(cfg.shine, 0.75));
+      });
+    } else if (fl.type === 'waterSource') {
+      // ── Source d'eau : anneaux concentriques pulsés ───────────────────────
+      const wavePulse = Math.abs(Math.sin(t * 1.6 + idSeed));
+      canvas.drawCircle(flsx+sway, flsy, fr2*3.0, mkAlpha(cfg.bright, 0.10*wavePulse));
+      canvas.drawCircle(flsx+sway, flsy, fr2*2.0, mkAlpha(cfg.bright, 0.18*(1-wavePulse)));
+      // Flaque centrale (contour + corps)
+      canvas.drawCircle(flsx+sway, flsy, fr2*1.3, mkAlpha(cfg.out, 0.90));
+      canvas.drawCircle(flsx+sway, flsy, fr2*1.1, mkAlpha(cfg.body, 0.92));
+      canvas.drawCircle(flsx+sway, flsy, fr2*0.7, mkAlpha(cfg.bright, 0.85));
+      // Reflet de lumière
+      canvas.drawCircle(flsx+sway-fr2*0.25, flsy-fr2*0.25, fr2*0.25, mkAlpha(cfg.shine, 0.70));
+    } else if (fl.type === 'herbs' || fl.type === 'poisonPlant') {
+      // ── Herbes / plante toxique : touffe de feuilles ─────────────────────
+      const isPoisonous = fl.type === 'poisonPlant';
+      // Feuilles latérales (contour + corps)
+      const leafPos = [[-0.75,-0.5],[0.75,-0.5],[-0.45,-0.9],[0.45,-0.9],[0,-0.85]];
+      leafPos.forEach(([lx,ly]) => {
+        canvas.drawCircle(flsx+sway+fr2*lx, flsy+fr2*ly, fr2*0.55, mkAlpha(cfg.out, 0.90));
+        canvas.drawCircle(flsx+sway+fr2*lx, flsy+fr2*ly, fr2*0.38, mkAlpha(cfg.body, 0.92));
+      });
+      // Centre
+      canvas.drawCircle(flsx+sway, flsy-fr2*0.3, fr2*0.70, mkAlpha(cfg.out, 0.92));
+      canvas.drawCircle(flsx+sway, flsy-fr2*0.3, fr2*0.50, mkAlpha(cfg.bright, 0.92));
+      // Symbole toxique (point jaune-vert si poisson)
+      if (isPoisonous) {
+        canvas.drawCircle(flsx+sway, flsy-fr2*0.95, fr2*0.30, mkAlpha('#ffee00', 0.90));
+        canvas.drawCircle(flsx+sway, flsy-fr2*0.95, fr2*0.16, mkAlpha('#000000', 0.80));
+      }
+    }
   });
 
   // ── Particules ────────────────────────────────────────────────────────────
@@ -701,11 +1453,18 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       }
     }
   }
+  // Flore sur minimap
+  const FLORA_MM_C = { berries:'#e04080', herbs:'#30a040', mushroom:'#c06818', waterSource:'#1870d8', poisonPlant:'#909000' };
+  (v.flora || []).forEach(fl => {
+    if (fl.collected) return;
+    const fc2 = FLORA_MM_C[fl.type] || '#668844';
+    canvas.drawCircle(mmx + fl.x*sc, mmy + fl.y*sc, 1.0, mkAlpha(fc2, 0.70));
+  });
   // Faune sur minimap
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
     const fc = FAUNA_COLORS[f.type] || '#888';
-    canvas.drawCircle(mmx + f.x*sc, mmy + f.y*sc, 1.2, mkAlpha(fc, 0.65));
+    canvas.drawCircle(mmx + f.x*sc, mmy + f.y*sc, 1.4, mkAlpha(fc, 0.70));
   });
   // Cercle vision sur minimap
   if (followed) {
@@ -732,21 +1491,96 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   }
 }
 
+// ── Debug overlay (se met à jour toutes les secondes) ────────────────────
+function DebugOverlay({ SH, canvasHRef, zoom, spriteImgsRef }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const H  = canvasHRef.current;
+  const z  = Math.round((zoom.current || 0) * 10) / 10;
+  const sp = Object.values(spriteImgsRef.current || {}).filter(Boolean).length;
+  return (
+    <View style={{
+      position:'absolute', top:55, right:4,
+      backgroundColor:'#ff0000', padding:8, borderRadius:8,
+      minWidth:140,
+    }} pointerEvents="none">
+      <Text style={{ color:'#fff', fontSize:13, fontWeight:'bold' }}>🔴 DEBUG v2</Text>
+      <Text style={{ color:'#fff', fontSize:12 }}>SH={SH}  H={H}</Text>
+      <Text style={{ color:'#fff', fontSize:12 }}>zoom={z}  sp={sp}/5</Text>
+    </View>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 export default function BattleMap({ battleState, onChampionTap }) {
-  const { width: W, height: H } = useWindowDimensions();
+  console.log('🗺️ BattleMap v2 — nouveau code chargé');
+  const { width: W, height: SH } = useWindowDimensions();
+  // Hauteur réelle du canvas (≠ SH qui est la hauteur écran)
+  const canvasHRef = useRef(SH);
+
+  // ── Sprites — double chargement : useImage (PNG) + base64 (fallback immédiat) ──
+  const imgIdle   = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Idle_with_shadow.png'));
+  const imgWalk   = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Walk_with_shadow.png'));
+  const imgRun    = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Run_with_shadow.png'));
+  const imgAttack = useImage(require('../../assets/sprites/PNG/Sword/With_shadow/Sword_attack_with_shadow.png'));
+  const imgDeath  = useImage(require('../../assets/sprites/PNG/Unarmed/With_shadow/Unarmed_Death_with_shadow.png'));
+
+  const spriteImgsRef = useRef({});
+
+  // Chargement immédiat depuis base64 au montage (disponible dès la 1ère frame)
+  // Utilise fromBytes (API native iOS/Android) — fromBase64 n'existe que sur web
+  useEffect(() => {
+    const makeImg = (b64) => {
+      try {
+        // atob disponible dans Hermes (RN) → binary string → Uint8Array
+        const binStr = atob(b64);
+        const bytes  = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+        const data = Skia.Data.fromBytes(bytes);
+        const img  = Skia.Image.MakeImageFromEncoded(data);
+        console.log('🖼️ sprite loaded:', img ? `${img.width()}x${img.height()}` : 'NULL');
+        return img;
+      } catch (e) {
+        console.warn('❌ sprite load error:', e.message);
+        return null;
+      }
+    };
+    const imgs = {
+      idle:   makeImg(SPRITES.idle.b64),
+      walk:   makeImg(SPRITES.walk.b64),
+      run:    makeImg(SPRITES.run.b64),
+      attack: makeImg(SPRITES.attack.b64),
+      death:  makeImg(SPRITES.death.b64),
+    };
+    const loaded = Object.values(imgs).filter(Boolean).length;
+    console.log(`✅ Sprites chargés: ${loaded}/5`);
+    spriteImgsRef.current = imgs;
+  }, []);
+
+  // Mise à jour si useImage charge (meilleure qualité / rendu natif)
+  useEffect(() => {
+    const cur = spriteImgsRef.current;
+    if (imgIdle)   cur.idle   = imgIdle;
+    if (imgWalk)   cur.walk   = imgWalk;
+    if (imgRun)    cur.run    = imgRun;
+    if (imgAttack) cur.attack = imgAttack;
+    if (imgDeath)  cur.death  = imgDeath;
+  }, [imgIdle, imgWalk, imgRun, imgAttack, imgDeath]);
 
   // ── Caméra en espace iso ───────────────────────────────────────────────
   const { ix: defIx, iy: defIy } = mapCenterIso();
   const camIx       = useRef(defIx);
   const camIy       = useRef(defIy);
-  const zoom        = useRef(0.92);
-  const targetZoom  = useRef(0.92);  // zoom cible (interpolé en douceur)
+  const zoom        = useRef(6.0);
+  const targetZoom  = useRef(6.0);  // zoom cible (interpolé en douceur)
   const prevFollowId= useRef(null);  // détection changement follow → zoom auto
   const timeRef     = useRef(0);
   const lastTs      = useRef(null);
   const savedCam    = useRef({ ix: defIx, iy: defIy });
-  const savedZoom   = useRef(0.92);
+  const savedZoom   = useRef(6.0);
 
   // ── Interpolation tick ────────────────────────────────────────────────
   const lastTickRef = useRef(Date.now());
@@ -761,7 +1595,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
     alliances: [], dayPhase: 0, tick: 0,
     supplies: [], loots: [], biome: 'forêt', followId: null,
     particles: [], pendingSpawns: [],
-    heightMap: null, fauna: [], activeEvent: null,
+    heightMap: null, fauna: [], flora: [], activeEvent: null,
+    weather: 'clear', simPhase: 'main', obstacles: [],
   });
 
   // ── Suivi champion ────────────────────────────────────────────────────
@@ -806,27 +1641,31 @@ export default function BattleMap({ battleState, onChampionTap }) {
       // Détection changement de follow → ajuster zoom cible
       if (fId !== prevFollowId.current) {
         if (fId) {
-          // Zoom avant sur le perso — niveau adapté
-          targetZoom.current = 2.8;
+          // Zoom fort sur le champion (bien centré, bien visible)
+          targetZoom.current = 8.0;
         } else {
-          // Retour vue globale
-          targetZoom.current = 0.92;
+          // Retour vue globale → recentrer la caméra sur la map
+          targetZoom.current = 6.0;
+          const { ix: cx, iy: cy } = mapCenterIso();
+          // Snap rapide vers le centre (65% en 1 frame)
+          camIx.current += (cx - camIx.current) * 0.65;
+          camIy.current += (cy - camIy.current) * 0.65;
         }
         prevFollowId.current = fId;
       }
-      // Interpolation douce du zoom (lerp 6% par frame)
-      zoom.current += (targetZoom.current - zoom.current) * 0.06;
+      // Interpolation douce du zoom (lerp 8% par frame)
+      zoom.current += (targetZoom.current - zoom.current) * 0.08;
 
       if (fId) {
         const fc = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
         if (fc) {
           const hm = gvisRef.current.heightMap;
-          const wz = hm ? getElev(fc.x, fc.y, hm) : 1;
-          const { ix: tix, iy: tiy } = wToIso(fc.x, fc.y, wz);
-          // Caméra plus serrée (lerp plus rapide au zoom avant)
-          const lerpF = 0.09 + (zoom.current - 0.92) * 0.015;
-          camIx.current += (tix - camIx.current) * lerpF;
-          camIy.current += (tiy - camIy.current) * lerpF;
+          // Camera target : position au sol (élévation ignorée) pour éviter
+          // que les pics de montagne décalent la caméra hors de la carte
+          const { ix: tix, iy: tiy } = wToIso(fc.x, fc.y, 0);
+          // Lerp rapide (18%) pour ne pas rester en mode "écran noir" trop longtemps
+          camIx.current += (tix - camIx.current) * 0.18;
+          camIy.current += (tiy - camIy.current) * 0.18;
         } else {
           // Champion mort → libérer caméra
           gvisRef.current.followId = null;
@@ -862,21 +1701,23 @@ export default function BattleMap({ battleState, onChampionTap }) {
         if (cv.combatFlash > 0) cv.combatFlash = Math.max(0, cv.combatFlash - dtSec);
       });
 
-      // Rendu Skia
+      // Rendu Skia — utilise la vraie hauteur canvas (pas la hauteur écran)
+      const H = canvasHRef.current > 80 ? canvasHRef.current : SH;
       const rec = Skia.PictureRecorder();
       const cvs = rec.beginRecording(Skia.XYWHRect(0, 0, W, H));
       drawIsoScene(
         cvs, timeRef.current, gvisRef.current,
         sortedTilesRef.current,
         camIx.current, camIy.current, zoom.current,
-        fontMidRef.current, fontSmRef.current, W, H
+        fontMidRef.current, fontSmRef.current, W, H,
+        spriteImgsRef.current
       );
       setPicture(rec.finishRecordingAsPicture());
       rafRef.current = requestAnimationFrame(animate);
     };
     rafRef.current = requestAnimationFrame(animate);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [W, H]);
+  }, [W, SH]);
 
   // ── Sync depuis battleState ───────────────────────────────────────────
   useEffect(() => {
@@ -894,7 +1735,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
     const hm    = battleState.map?.heightMap
       || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
-    // Normalisation → espace monde 0-100 (backend = 100×100, simulateur = 300×300)
+    // Normalisation → espace monde 0-100 (backend = 100×100, simulateur = 1800×1800)
     const mapW = battleState.map?.width  || 100;
     const mapH = battleState.map?.height || 100;
     const sX   = 100 / mapW;
@@ -916,8 +1757,11 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
     const prevMap = new Map((gvisRef.current.champions || []).map(cv => [cv.id, cv]));
     const champs  = (battleState.champions || []).map((c, i) => {
-      const ex  = prevMap.get(c.id);
-      const tx  = c.x * sX, ty = c.y * sY;   // normalisé en 0-100
+      const ex     = prevMap.get(c.id);
+      const tx     = c.x * sX, ty = c.y * sY;   // normalisé en 0-100
+      const moveDx = ex ? tx - ex.prevX : 0;
+      const moveDy = ex ? ty - ex.prevY : 0;
+      const moved  = Math.hypot(moveDx, moveDy);
       return {
         id: c.id,
         x: ex ? ex.x : tx, y: ex ? ex.y : ty,
@@ -936,6 +1780,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
         elevation: c.elevation || 1,
         visionRadius: c.visionRadius || 12,
         isFollowed: gvisRef.current.followId === c.id,
+        isMoving: moved > 0.4,
+        facingRight: moveDx >= 0,
+        weapon: c.weapon || 'stone_knife',
       };
     });
 
@@ -970,6 +1817,8 @@ export default function BattleMap({ battleState, onChampionTap }) {
       particles:     gvisRef.current.particles || [],
       pendingSpawns: spawns,
       fauna:         (battleState.map?.fauna || []).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
+      flora:         (battleState.map?.flora || []).filter(f => !f.collected).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),
+      obstacles:     (battleState.map?.obstacles || []).map(o => ({ ...o, x: o.x * sX, y: o.y * sY, radius: (o.radius || 5) * sX })),
       activeEvent:   battleState.activeEvent || null,
       weather:       battleState.weather || 'clear',
       simPhase:      battleState.simPhase || 'main',
@@ -978,6 +1827,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   // ── Tap handler ───────────────────────────────────────────────────────
   const handleTap = useCallback((ex, ey) => {
+    const H  = canvasHRef.current > 80 ? canvasHRef.current : SH;
     const v  = gvisRef.current;
     const hm = v.heightMap;
 
@@ -997,7 +1847,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
     }
 
     // Tap minimap → déplace caméra iso
-    const MM = 80, MMP = 8, mmy = H - MM - MMP;
+    const MM = 72, MMP = 10, mmy = H - MM - MMP - 2;
     if (ex >= MMP && ex <= MMP+MM && ey >= mmy && ey <= mmy+MM) {
       const sc = MM / (HM_CELLS * HM_CELL);
       const wx = (ex - MMP) / sc;
@@ -1010,7 +1860,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
     gvisRef.current.followId = null;
     setFollowInfo(null);
-  }, [W, H, onChampionTap]);
+  }, [W, SH, onChampionTap]);
 
   // ── Gestes ───────────────────────────────────────────────────────────
   const panGesture = Gesture.Pan()
@@ -1023,14 +1873,22 @@ export default function BattleMap({ battleState, onChampionTap }) {
     .runOnJS(true);
 
   const pinchGesture = Gesture.Pinch()
-    .onStart(() => { savedZoom.current = zoom.current; })
+    .onStart(() => {
+      savedZoom.current = zoom.current;
+      savedCam.current  = { ix: camIx.current, iy: camIy.current };
+    })
     .onUpdate(e => {
-      const nz  = Math.max(0.5, Math.min(6, savedZoom.current * e.scale));
-      const dix = (e.focalX - W/2) / zoom.current;
-      const diy = (e.focalY - H/2) / zoom.current;
-      zoom.current = nz;
-      camIx.current += dix - (e.focalX - W/2) / nz;
-      camIy.current += diy - (e.focalY - H/2) / nz;
+      const prevZoom = zoom.current;
+      const nz = Math.max(0.4, Math.min(8, savedZoom.current * e.scale));
+      // Ancrage focal : le point sous les doigts doit rester fixe à l'écran
+      // delta cam = focalIso_avant - focalIso_après
+      //           = (focalScreen - center) / prevZoom - (focalScreen - center) / newZoom
+      const fx = e.focalX - W / 2;
+      const fy = e.focalY - H / 2;
+      camIx.current += fx / prevZoom - fx / nz;
+      camIy.current += fy / prevZoom - fy / nz;
+      zoom.current        = nz;
+      targetZoom.current  = nz;  // empêche le lerp de se battre contre le geste
     })
     .runOnJS(true);
 
@@ -1038,9 +1896,9 @@ export default function BattleMap({ battleState, onChampionTap }) {
     .onEnd(() => {
       const { ix, iy } = mapCenterIso();
       camIx.current = ix; camIy.current = iy;
-      zoom.current = 0.92; targetZoom.current = 0.92;
+      zoom.current = 6.0; targetZoom.current = 6.0;
       gvisRef.current.followId = null;
-      prevFollowId.current = null;
+      prevFollowId.current = null;  // empêche le zoom-follow de se réactiver
       setFollowInfo(null);
     })
     .runOnJS(true);
@@ -1055,12 +1913,18 @@ export default function BattleMap({ battleState, onChampionTap }) {
   );
 
   return (
-    <View style={StyleSheet.absoluteFill}>
+    <View
+      style={StyleSheet.absoluteFill}
+      onLayout={(e) => { canvasHRef.current = e.nativeEvent.layout.height; }}
+    >
       <GestureDetector gesture={gesture}>
         <Canvas style={StyleSheet.absoluteFill}>
           {picture && <Picture picture={picture} />}
         </Canvas>
       </GestureDetector>
+
+      {/* DEBUG OVERLAY — à supprimer après vérif */}
+      <DebugOverlay SH={SH} canvasHRef={canvasHRef} zoom={zoom} spriteImgsRef={spriteImgsRef} />
 
       {/* Barre POV ← champion suivi → */}
       <View style={styles.povBar} pointerEvents="box-none">
@@ -1100,7 +1964,7 @@ const styles = StyleSheet.create({
   povBtnTxt:   { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
   povCenter: {
     flex: 1, maxWidth: 170,
-    backgroundColor: 'rgba(0,0,0,0.60)',
+    backgroundColor: 'rgba(255,0,0,0.90)',
     borderRadius: 22,
     paddingHorizontal: 14, paddingVertical: 7,
     alignItems: 'center',

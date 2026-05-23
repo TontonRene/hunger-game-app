@@ -169,13 +169,14 @@ img.onload=function(){
     ctx.ellipse(cx,spY+SPH*0.97,SPW*0.35,SPW*0.09,0,0,Math.PI*2);
     ctx.fill();
 
-    // 6 couches : corps, cheveux, haut, ceinture, chaussures, pantalon
-    drawLayer(img, frame, 0, SKIN,  alpha);
-    drawLayer(img, frame, 1, HAIR,  alpha);
-    drawLayer(img, frame, 2, SHIRT, alpha);
-    drawLayer(img, frame, 3, null,  alpha);
-    drawLayer(img, frame, 4, null,  alpha);
-    drawLayer(img, frame, 5, PANTS, alpha);
+    // 6 couches dans l'ordre visuel correct (bas → haut) :
+    // corps → pantalon → haut → ceinture → chaussures → cheveux
+    drawLayer(img, frame, 0, SKIN,  alpha); // corps/peau
+    drawLayer(img, frame, 5, PANTS, alpha); // pantalon (sur le corps)
+    drawLayer(img, frame, 2, SHIRT, alpha); // haut (sur le corps)
+    drawLayer(img, frame, 3, null,  alpha); // ceinture
+    drawLayer(img, frame, 4, null,  alpha); // chaussures
+    drawLayer(img, frame, 1, HAIR,  alpha); // cheveux (par-dessus tout)
 
     // Croix pour mort
     if(IS_DEAD){

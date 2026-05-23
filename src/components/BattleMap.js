@@ -568,12 +568,14 @@ function generateLook(id) {
     pantsTint: _PANTS_COLS[(h >> 9)  % _PANTS_COLS.length],
   };
 }
-// Cache de paints tintés (ColorFilter.MakeBlend Multiply)
+// Cache de paints tintés (ColorFilter.MakeBlend Color = hue+sat du tint, luminosité du sprite)
+// BlendMode.Color préserve l'éclairage/ombre du sprite tout en appliquant la couleur du tint.
+// NE PAS utiliser Multiply : le sprite est déjà coloré, Multiply assombrit tout.
 const _tintCache = {};
 function _getTintPaint(hexColor, alpha) {
   if (!_tintCache[hexColor]) {
     const p = Skia.Paint();
-    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(hexColor), BlendMode.Multiply));
+    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(hexColor), BlendMode.Color));
     _tintCache[hexColor] = p;
   }
   _tintCache[hexColor].setAlphaf(alpha);
@@ -645,13 +647,13 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
       const fW = charSheet.width() / 8;
       const fH = charSheet.height() / 12;
       const gs = (pair) => Skia.XYWHRect(0, pair * 2 * fH, fW, fH);
-      // Couches grisées semi-transparentes (personnage à terre)
+      // Couches grisées semi-transparentes (personnage à terre) — même ordre que vivant
       canvas.drawImageRect(charSheet, gs(0), dst, _getTintPaint(look.skinTint  || '#c09070', 0.28));
-      canvas.drawImageRect(charSheet, gs(1), dst, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
+      canvas.drawImageRect(charSheet, gs(5), dst, _getTintPaint(look.pantsTint || '#555555', 0.28));
       canvas.drawImageRect(charSheet, gs(2), dst, _getTintPaint(look.shirtTint || '#888888', 0.28));
       canvas.drawImageRect(charSheet, gs(3), dst, _getSpriteP(0.22));
       canvas.drawImageRect(charSheet, gs(4), dst, _getSpriteP(0.22));
-      canvas.drawImageRect(charSheet, gs(5), dst, _getTintPaint(look.pantsTint || '#555555', 0.28));
+      canvas.drawImageRect(charSheet, gs(1), dst, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
     } else {
       const ds = Math.max(0.5, zoom * 0.45);
       const xp = Skia.Path.Make();
@@ -699,13 +701,14 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const getSrc = (pair) =>
       Skia.XYWHRect(frameIdx * fW, (pair * 2 + dirOff) * fH, fW, fH);
 
-    // 6 couches : corps, cheveux, haut, ceinture, chaussures, pantalon
-    canvas.drawImageRect(charSheet, getSrc(0), dst, _getTintPaint(skinTint,  baseA));
-    canvas.drawImageRect(charSheet, getSrc(1), dst, _getTintPaint(hairTint,  baseA));
-    canvas.drawImageRect(charSheet, getSrc(2), dst, _getTintPaint(shirtTint, baseA));
-    canvas.drawImageRect(charSheet, getSrc(3), dst, _getSpriteP(baseA));
-    canvas.drawImageRect(charSheet, getSrc(4), dst, _getSpriteP(baseA));
-    canvas.drawImageRect(charSheet, getSrc(5), dst, _getTintPaint(pantsTint, baseA));
+    // 6 couches dans le bon ordre visuel (bas → haut) :
+    // corps → pantalon → haut → ceinture → chaussures → cheveux
+    canvas.drawImageRect(charSheet, getSrc(0), dst, _getTintPaint(skinTint,  baseA)); // corps
+    canvas.drawImageRect(charSheet, getSrc(5), dst, _getTintPaint(pantsTint, baseA)); // pantalon
+    canvas.drawImageRect(charSheet, getSrc(2), dst, _getTintPaint(shirtTint, baseA)); // haut
+    canvas.drawImageRect(charSheet, getSrc(3), dst, _getSpriteP(baseA));               // ceinture
+    canvas.drawImageRect(charSheet, getSrc(4), dst, _getSpriteP(baseA));               // chaussures
+    canvas.drawImageRect(charSheet, getSrc(1), dst, _getTintPaint(hairTint,  baseA)); // cheveux
 
     // Ring indicateur sous les pieds
     canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,

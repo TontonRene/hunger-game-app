@@ -925,7 +925,7 @@ function createSimState(cfg={}) {
 const toward = (t,c) => ({dx:sign(t.x-c.x)||noise(1), dy:sign(t.y-c.y)||noise(1)});
 const away   = (t,c) => ({dx:sign(c.x-t.x)||noise(1), dy:sign(c.y-t.y)||noise(1)});
 
-function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent, fauna, flora, tick) {
+function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent, fauna, flora, tick, corpses) {
   const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
 
   // Alliés : exclure des ennemis cibles
@@ -981,7 +981,7 @@ function aiMove(c, alive, _zone, supplies, pois, isNight, alliances, activeEvent
   const needsStone  = nextWeaponRecipe ? Math.max(0,(nextWeaponRecipe.cost.stone||0)-(res.stone||0)) : 0;
   const needsFiber  = nextWeaponRecipe ? Math.max(0,(nextWeaponRecipe.cost.fiber||0)-(res.fiber||0)) : 0;
   const needsHide   = Math.max(0, 2-(res.hide||0));
-  const nearCorpse  = (state.map.corpses||[]).find(cp=>dist(cp,c)<360);
+  const nearCorpse  = (corpses||[]).find(cp=>dist(cp,c)<360);
   const waterPOI2   = pois.find(p=>!p._disabled&&!p._depleted&&(p.effect==='water'));
   const coverPOI    = pois.find(p=>!p._disabled&&(p.effect==='cover'||p.effect==='shelter'));
 
@@ -2181,7 +2181,7 @@ function tickSim(prev) {
         dx = noise(1); dy = noise(1);
       }
     } else {
-      const r = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick);
+      const r = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick, state.map.corpses);
       dx = r.dx; dy = r.dy;
     }
     const fatMult = (c.traits||[]).includes('lazy') ? 1.7 : (c.traits||[]).includes('athlete') ? 0.6 : 1;

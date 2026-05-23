@@ -577,11 +577,11 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const deathImg = spriteImgs?.death || spriteImgs?.idle;
     if (deathImg) {
       const deathFrames = spriteImgs?.death ? (SPRITES.death?.frames || 7) : 12;
-      const spH    = Math.max(12, zoom * (TILE_H / 2) * 3.2);
+      const spH    = Math.max(12, zoom * (TILE_H / 2) * 2.0);
       const frameW = deathImg.width() / deathFrames;
-      const frameH = deathImg.height();
-      const spW    = spH * (frameW / frameH);
-      // Affiche le dernier frame (position allongé)
+      const frameH = deathImg.height() / 4;            // 4 lignes, prend la ligne 0 (bas/face)
+      const spW    = spH;                              // ratio 1:1
+      // Affiche le dernier frame (position allongé) — ligne 0 = face caméra
       const lastFrame = deathFrames - 1;
       canvas.drawImageRect(
         deathImg,
@@ -617,16 +617,17 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   if (animImg) {
     const frameIdx = Math.floor(t * animFps) % animFrames;
     const frameW   = animImg.width() / animFrames;
-    const frameH   = animImg.height();
-    const spH      = Math.max(14, zoom * (TILE_H / 2) * 4.5);  // ~4.5 tile-heights (20% plus grand qu'avant)
-    const spW      = spH * (frameW / frameH);
+    const frameH   = animImg.height() / 4;             // sprite sheet 4 lignes (directions)
+    const dirRow   = cv.dirRow ?? 0;                   // 0=bas 1=gauche 2=droite 3=haut
+    const spH      = Math.max(16, zoom * (TILE_H / 2) * 2.8);  // taille pour frame 1:1
+    const spW      = spH;                              // frame 64×64 → ratio 1:1
     const spX      = sx - spW / 2;
     const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;
     const spYfinal = sy - spH + bob;
 
     canvas.drawImageRect(
       animImg,
-      Skia.XYWHRect(frameIdx * frameW, 0, frameW, frameH),
+      Skia.XYWHRect(frameIdx * frameW, dirRow * frameH, frameW, frameH),  // ligne = direction
       Skia.XYWHRect(spX, spYfinal, spW, spH),
       _getSpriteP(baseA)
     );
@@ -1742,6 +1743,13 @@ export default function BattleMap({ battleState, onChampionTap }) {
       const moveDx = ex ? tx - ex.prevX : 0;
       const moveDy = ex ? ty - ex.prevY : 0;
       const moved  = Math.hypot(moveDx, moveDy);
+      // Direction row persistante : 0=bas, 1=gauche, 2=droite, 3=haut
+      let dirRow = ex ? (ex.dirRow ?? 0) : 0;
+      if (moved > 0.4) {
+        const adx = Math.abs(moveDx), ady = Math.abs(moveDy);
+        if (adx >= ady) dirRow = moveDx >= 0 ? 2 : 1;
+        else            dirRow = moveDy >= 0 ? 0 : 3;
+      }
       return {
         id: c.id,
         x: ex ? ex.x : tx, y: ex ? ex.y : ty,
@@ -1761,7 +1769,7 @@ export default function BattleMap({ battleState, onChampionTap }) {
         visionRadius: c.visionRadius || 12,
         isFollowed: gvisRef.current.followId === c.id,
         isMoving: moved > 0.4,
-        facingRight: moveDx >= 0,
+        dirRow,
         weapon: c.weapon || 'stone_knife',
       };
     });

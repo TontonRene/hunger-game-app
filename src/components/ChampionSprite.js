@@ -101,13 +101,13 @@ var cv=document.getElementById('c'),   ctx=cv.getContext('2d');
 bgC.width=W; bgC.height=H;
 cv.width=W;  cv.height=H;
 
-// Taille de rendu
-var BASE = Math.min(W,H)*0.62*SCALE;
+// Taille de rendu — frame 64×64 (1 direction sur 4), ratio 1:1
+var BASE = Math.min(W,H)*0.68*SCALE;
 var SPW = BASE;
-var SPH = BASE*1.9;
+var SPH = BASE;        // ratio 1:1 (était BASE*1.9 pour les 4 lignes empilées)
 
 var cx=W/2, cy=H/2;
-var spX=cx-SPW/2, spY=cy-SPH*0.52;
+var spX=cx-SPW/2, spY=cy-SPH*0.60;  // centré verticalement
 
 // ── Fond statique ──────────────────────────────────────────────────────────
 function drawBg() {
@@ -174,7 +174,7 @@ var frame=0, lastT=0;
 var orbitAngle=0;
 
 img.onload=function(){
-  var fw=img.width/FRAMES, fh=img.height;
+  var fw=img.width/FRAMES, fh=img.height/4;  // 4 lignes (directions), prend la 1ère (face/bas)
 
   function render(ts) {
     requestAnimationFrame(render);
@@ -222,7 +222,7 @@ img.onload=function(){
     // Sprite base
     ctx.save();
     if(IS_DEAD){ ctx.globalAlpha=0.42; ctx.filter='grayscale(65%) brightness(0.55)'; }
-    ctx.drawImage(img, frame*fw,0,fw,fh, sx,sy,SPW,SPH);
+    ctx.drawImage(img, frame*fw,0,fw,fh, sx,sy,SPW,SPH);  // row 0 = face/bas (direction par défaut)
     ctx.restore();
 
     // Tint multiply (coloration champion — appliqué avec source-atop sur sprite)

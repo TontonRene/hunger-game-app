@@ -551,7 +551,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
 
   if (sx < -50 || sx > W + 50 || sy < -100 || sy > H + 50) return;
 
-  const sc    = Math.max(0.8, zoom * 0.75);  // échelle UI (barres, ombres, anneaux)
+  const sc    = Math.min(1.8, Math.max(0.5, zoom * 0.28));  // échelle UI proportionnelle aux sprites (barres, ombres, anneaux)
   const baseA = cv.hasCamo ? 0.35 : 1.0;
   const col   = cv.color;
 
@@ -577,7 +577,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const deathImg = spriteImgs?.death || spriteImgs?.idle;
     if (deathImg) {
       const deathFrames = spriteImgs?.death ? (SPRITES.death?.frames || 7) : 12;
-      const spH    = Math.max(20, zoom * 38);
+      const spH    = Math.max(12, zoom * (TILE_H / 2) * 3.2);
       const frameW = deathImg.width() / deathFrames;
       const frameH = deathImg.height();
       const spW    = spH * (frameW / frameH);
@@ -618,7 +618,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const frameIdx = Math.floor(t * animFps) % animFrames;
     const frameW   = animImg.width() / animFrames;
     const frameH   = animImg.height();
-    const spH      = Math.max(22, zoom * 42);  // sprites bien proportionnels aux tiles
+    const spH      = Math.max(14, zoom * (TILE_H / 2) * 4.5);  // ~4.5 tile-heights (20% plus grand qu'avant)
     const spW      = spH * (frameW / frameH);
     const spX      = sx - spW / 2;
     const bob      = isMoving ? Math.sin(t * 10 + cv.idx) * 1.0*sc : Math.sin(t * 2 + cv.idx) * 0.5*sc;

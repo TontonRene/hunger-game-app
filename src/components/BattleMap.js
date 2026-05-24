@@ -325,198 +325,86 @@ function _tileRng(gx, gy, idx) {
   return ((s * 1664525 + 1013904223) >>> 0) / 4294967296;
 }
 
-// ── Dessin d'un cube isométrique — rendu riche ────────────────────────────
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, tileImg) {
+// ── Table de tiles par biome — iso_tiles.png (352×352, grille 11×11, 32×32/tile)
+// Index i → col=i%11, row=floor(i/11) — row0=terre, row1-3=herbe, row8=eau, row10=neige
+const _BTILES = {
+  'forêt':    [98, 11, 12, 22, 23, 30, 38, 39],
+  'désert':   [98,  0,  1,  2,  3,  4,  5,  3],
+  'toundra':  [104, 110, 111, 112, 110, 111, 112, 110],
+  'marais':   [98, 22, 11, 33, 38, 40, 33, 38],
+  'montagne': [98,  0,  1, 11, 22, 12, 22, 11],
+  'volcan':   [98,  0,  0,  1,  2,  3,  2,  0],
+  'jungle':   [98, 22, 33, 40, 38, 41, 33, 22],
+};
+function _isoTileIdx(biome, h, gx, gy) {
+  const arr = _BTILES[biome] || _BTILES['forêt'];
+  const base = arr[Math.min(h, arr.length - 1)];
+  if (h === 0) return base;  // eau : pas de variation
+  const rng = _tileRng(gx, gy, 6);
+  return base + (rng < 0.40 ? 0 : rng < 0.72 ? 1 : 2);
+}
+
+// ── Dessin d'un cube isométrique — tiles PNG pré-rendu ───────────────────
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
-  const tz = h * TILE_Z * zoom;
 
   const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, h);
   const tx = W / 2 + (ix - camIx) * zoom;
   const ty = H / 2 + (iy - camIy) * zoom;
 
-  if (tx < -tw * 3 || tx > W + tw * 3 || ty < -th - tz - 16 || ty > H + th + 16) return;
+  // Tile PNG : 32×32 src → tw*2 × tw*2 dst (carré — le tile inclut déjà les flancs)
+  const tW = tw * 2;   // = TILE_W * zoom
+  const tH = tW;       // image carrée
+
+  if (tx < -tW || tx > W + tW || ty < -tH || ty > H + tH) return;
 
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
-  const [topC, rightC, leftC] = tileColors(biome, h);
 
-  // ── Variations déterministes per-tile ────────────────────────────────────
-  const r0 = _tileRng(gx, gy, 0);
-  const r1 = _tileRng(gx, gy, 1);
-  const r2 = _tileRng(gx, gy, 2);
-  const r3 = _tileRng(gx, gy, 3);
-  const r4 = _tileRng(gx, gy, 4);
+  if (isoTilesImg) {
+    // ── Tile PNG isométrique pré-rendu ───────────────────────────────────────
+    const tIdx = _isoTileIdx(biome, h, gx, gy);
+    const srcCol = tIdx % 11;
+    const srcRow = Math.floor(tIdx / 11);
+    const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
+    const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
+    canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
 
-  // ── Face haut (losange) ───────────────────────────────────────────────────
-  _tp.rewind();
-  _tp.moveTo(tx,      ty - th);
-  _tp.lineTo(tx + tw, ty);
-  _tp.lineTo(tx,      ty + th);
-  _tp.lineTo(tx - tw, ty);
-  _tp.close();
-  canvas.drawPath(_tp, mkAlpha(topC, dimA));
-
-  // ── Texture tileset sur la face supérieure ────────────────────────────────
-  if (tileImg && zoom > 0.55 && dimA > 0.18) {
-    const tIdx = getTileIdx(biome, h, gx, gy);
-    const tCol = tIdx % 11, tRow = Math.floor(tIdx / 11);
-    canvas.save();
-    canvas.clipPath(_tp, _CLIP_INTERSECT, true);
-    canvas.drawImageRect(
-      tileImg,
-      Skia.XYWHRect(tCol * 32, tRow * 32, 32, 32),
-      Skia.XYWHRect(tx - tw, ty - th, tw * 2, th * 2),
-      _getSpriteP(0.80 * dimA)
-    );
-    canvas.restore();
-  }
-
-  // ── Texture de surface biome (uniquement si visible) ──────────────────────
-  if (zoom > 0.9 && dimA > 0.25 && h > 0) {
-    // Détails biome-spécifiques (seulement à zoom suffisant — pas de points génériques)
-    if (zoom > 1.4) {
-      if (biome === 'forêt') {
-        // Deux touffes d'herbe
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.55, ty + (r1-0.6)*th*0.5,  tw*0.09, mkAlpha('#0d2a08', 0.50*dimA));
-        canvas.drawCircle(tx + (r2-0.4)*tw*0.5,  ty + (r3-0.4)*th*0.55, tw*0.07, mkAlpha('#162e10', 0.45*dimA));
-      } else if (biome === 'jungle') {
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.6, ty + (r1-0.5)*th*0.6, tw*0.12, mkAlpha('#042204', 0.55*dimA));
-        canvas.drawCircle(tx + (r2-0.5)*tw*0.4, ty + (r3-0.5)*th*0.4, tw*0.08, mkAlpha('#0a3008', 0.45*dimA));
-      } else if (biome === 'désert') {
-        // Lignes de dunes ondulées
-        _ep.rewind();
-        _ep.moveTo(tx - tw*0.45, ty + (r0-0.5)*th*0.5);
-        _ep.lineTo(tx + tw*0.45, ty + (r1-0.5)*th*0.5);
-        canvas.drawPath(_ep, mkStrokeA('#c89850', Math.max(0.6, zoom*0.5), 0.22*dimA));
-      } else if (biome === 'toundra') {
-        // Patch de neige (très subtil)
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.10, mkAlpha('#d8eeff', 0.12*dimA));
-        canvas.drawCircle(tx + (r2-0.5)*tw*0.35, ty + (r3-0.5)*th*0.35, tw*0.06, mkAlpha('#eef8ff', 0.10*dimA));
-      } else if (biome === 'marais') {
-        // Flaque sombre
-        _ep.rewind();
-        _ep.addOval(Skia.XYWHRect(tx - tw*0.22 + (r0-0.5)*tw*0.3, ty - th*0.1 + (r1-0.5)*th*0.4, tw*0.44, th*0.22));
-        canvas.drawPath(_ep, mkAlpha('#041208', 0.22*dimA));
-      } else if (biome === 'montagne') {
-        // Fissure rocheuse
-        _ep.rewind();
-        _ep.moveTo(tx + (r0-0.5)*tw*0.5, ty - th*0.35);
-        _ep.lineTo(tx + (r1-0.5)*tw*0.3, ty + th*0.45);
-        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom*0.4), 0.16*dimA));
-      } else if (biome === 'volcan') {
-        // Veine de lave / chaleur
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.10, mkAlpha('#cc2000', 0.30*dimA));
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.05, mkAlpha('#ff6600', 0.45*dimA));
+    // Eau animée par-dessus le tile h=0
+    if (h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
+      const r0 = _tileRng(gx, gy, 0);
+      for (let wi = 0; wi < 2; wi++) {
+        const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
+        const ringA  = (1 - phase) * 0.16 * dimA;
+        if (ringA < 0.010) continue;
+        const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
+        _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx-rw, ty-rh, rw*2, rh*2));
+        canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom*0.28), ringA));
       }
     }
-  } else if (h === 0 && zoom > 0.7 && dimA > 0.15 && t != null) {
-    // ── Eau animée (h=0) — rides concentriques pulsées ───────────────────────
-    for (let wi = 0; wi < 3; wi++) {
-      const phase = ((t * 0.7 + r0 * 2.5 + wi * 0.38) % 1.0);
-      const ringA = (1 - phase) * 0.20 * dimA;
-      if (ringA < 0.015) continue;
-      const rw = tw * (0.20 + phase * 0.72);
-      const rh = th * (0.20 + phase * 0.72);
-      _ep.rewind();
-      _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
-      canvas.drawPath(_ep, mkStrokeA('#78b8e0', Math.max(0.5, zoom * 0.35), ringA));
-    }
-    // Reflet de lumière mobile
-    if (zoom > 1.2) {
-      const reflX = tx + Math.sin(t * 0.55 + r1 * 5.5) * tw * 0.30;
-      const reflY = ty + Math.cos(t * 0.40 + r2 * 5.5) * th * 0.25;
-      canvas.drawCircle(reflX, reflY, tw * 0.11, mkAlpha('#c8e8f8', 0.42 * dimA));
-      canvas.drawCircle(reflX + tw*0.06, reflY - th*0.04, tw * 0.05, mkAlpha('#ffffff', 0.35 * dimA));
-    }
-  }
-
-  // ── Arête lumineuse (haut-gauche + haut-droite) → effet 3D marqué ────────
-  if (zoom > 0.8 && dimA > 0.35) {
-    _ep.rewind();
-    _ep.moveTo(tx - tw, ty);       // coin gauche
-    _ep.lineTo(tx,      ty - th);  // sommet
-    _ep.lineTo(tx + tw, ty);       // coin droit
-    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.8, zoom * 0.7), 0.32 * dimA));
-  }
-
-  // ── Contour fin du losange (séparateur entre tiles) ───────────────────────
-  if (dimA > 0.2) {
-    canvas.drawPath(_tp, mkStrokeA('#000000', Math.max(0.4, zoom * 0.35), 0.18 * dimA));
-  }
-
-  // ── Faces latérales (h > 0) ───────────────────────────────────────────────
-  if (h > 0 && tz > 0.5) {
-    // Face droite (ombre)
-    _rp.rewind();
-    _rp.moveTo(tx,      ty + th);
-    _rp.lineTo(tx + tw, ty);
-    _rp.lineTo(tx + tw, ty + tz);
-    _rp.lineTo(tx,      ty + th + tz);
-    _rp.close();
-    canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
-
-    // Ligne de crête droite (jonction face haute / face droite)
-    _ep.rewind();
-    _ep.moveTo(tx,      ty + th);
-    _ep.lineTo(tx + tw, ty);
-    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.6, zoom * 0.55), 0.22 * dimA));
-
-    // Lignes de couches horizontales (effet terrain stratifié)
-    if (zoom > 1.2 && h >= 2 && dimA > 0.35) {
-      const layers = Math.min(h - 1, 3);
-      for (let li = 1; li <= layers; li++) {
-        const t1 = li / h;
-        const ly = tz * t1;
-        _ep.rewind();
-        _ep.moveTo(tx + tw * t1, ty + th + ly);
-        _ep.lineTo(tx + tw,      ty         + ly);
-        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.4), 0.14 * dimA));
-      }
-    }
-
-    // Face gauche (lumière)
-    _lp.rewind();
-    _lp.moveTo(tx - tw, ty);
-    _lp.lineTo(tx,      ty + th);
-    _lp.lineTo(tx,      ty + th + tz);
-    _lp.lineTo(tx - tw, ty + tz);
-    _lp.close();
-    canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
-
-    // Ligne de crête gauche
-    _ep.rewind();
-    _ep.moveTo(tx - tw, ty);
-    _ep.lineTo(tx,      ty + th);
-    canvas.drawPath(_ep, mkStrokeA('#ffffff', Math.max(0.6, zoom * 0.55), 0.18 * dimA));
-
-    // Lignes de couches gauche
-    if (zoom > 1.2 && h >= 2 && dimA > 0.35) {
-      const layers = Math.min(h - 1, 3);
-      for (let li = 1; li <= layers; li++) {
-        const t1 = li / h;
-        const ly = tz * t1;
-        _ep.rewind();
-        _ep.moveTo(tx - tw,          ty      + ly);
-        _ep.lineTo(tx - tw * (1-t1), ty + th + ly);
-        canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.4), 0.12 * dimA));
-      }
-    }
-
-    // Arête inférieure (bas des flancs — ligne sombre de contour)
-    if (zoom > 1.0 && dimA > 0.4) {
-      _ep.rewind();
-      _ep.moveTo(tx - tw, ty + tz);
-      _ep.lineTo(tx,      ty + th + tz);
-      _ep.lineTo(tx + tw, ty + tz);
-      canvas.drawPath(_ep, mkStrokeA('#000000', Math.max(0.5, zoom * 0.45), 0.20 * dimA));
+  } else {
+    // ── Fallback polygone (avant chargement PNG) ─────────────────────────────
+    const [topC, rightC, leftC] = tileColors(biome, h);
+    const tz = h * TILE_Z * zoom;
+    _tp.rewind();
+    _tp.moveTo(tx, ty-th); _tp.lineTo(tx+tw, ty);
+    _tp.lineTo(tx, ty+th); _tp.lineTo(tx-tw, ty); _tp.close();
+    canvas.drawPath(_tp, mkAlpha(topC, dimA));
+    if (h > 0 && tz > 0.5) {
+      _rp.rewind();
+      _rp.moveTo(tx,ty+th); _rp.lineTo(tx+tw,ty);
+      _rp.lineTo(tx+tw,ty+tz); _rp.lineTo(tx,ty+th+tz); _rp.close();
+      canvas.drawPath(_rp, mkAlpha(rightC, 0.96*dimA));
+      _lp.rewind();
+      _lp.moveTo(tx-tw,ty); _lp.lineTo(tx,ty+th);
+      _lp.lineTo(tx,ty+th+tz); _lp.lineTo(tx-tw,ty+tz); _lp.close();
+      canvas.drawPath(_lp, mkAlpha(leftC, 0.96*dimA));
     }
   }
 
-  // Arbres supprimés — rendu tileset seul
-
-  // Brume de guerre overlay
+  // Brume de guerre overlay (rect couvrant toute l'image du tile)
   if (fogA > 0.05) {
-    canvas.drawPath(_tp, mkAlpha('#000814', fogA * 0.72));
+    canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th, tW, tH), mkAlpha('#000814', fogA * 0.70));
   }
 }
 
@@ -536,19 +424,25 @@ const _LPC_HAIR  = ['bob', 'braid', 'bangs', 'afro', 'buzzcut', 'cornrows', 'cur
 const _LPC_TORSO = ['shirt', 'tshirt', 'leather', 'plate'];
 const _LPC_LEGS  = ['pants', 'shorts'];
 function generateLook(id) {
-  const h = _hashId(id);
+  const h0 = _hashId(id);
+  // Avalanche mixing — chaque étape brise la corrélation entre IDs séquentiels
+  const h1 = (Math.imul(h0 ^ (h0 >>> 16), 0x45d9f3b)) >>> 0;
+  const h2 = (Math.imul(h1 ^ (h1 >>> 16), 0x45d9f3b)) >>> 0;
+  const h3 = (Math.imul(h2 ^ (h2 >>> 13), 0x9e3779b9)) >>> 0;
+  const h4 = (Math.imul(h3 ^ (h3 >>> 11), 0x6c62272e)) >>> 0;
+  const h5 = (Math.imul(h4 ^ (h4 >>> 15), 0x165667b1)) >>> 0;
+  const h6 = (Math.imul(h5 ^ (h5 >>> 17), 0x27d4eb2f)) >>> 0;
+  const h7 = (Math.imul(h6 ^ (h6 >>> 13), 0x85ebca6b)) >>> 0;
   return {
-    // Champs legacy (fallback charSheet)
-    skinTint:  _SKIN_COLS[h          % _SKIN_COLS.length],
-    hairTint:  _HAIR_COLS[(h >> 3)   % _HAIR_COLS.length],
-    shirtTint: _SHIRT_COLS[(h >> 6)  % _SHIRT_COLS.length],
-    pantsTint: _PANTS_COLS[(h >> 9)  % _PANTS_COLS.length],
-    // Champs LPC
-    bodyType: _LPC_BODY [(h >> 12) % _LPC_BODY.length],
-    hair:     _LPC_HAIR [(h >> 15) % _LPC_HAIR.length],
-    torso:    _LPC_TORSO[(h >> 18) % _LPC_TORSO.length],
-    legs:     _LPC_LEGS [(h >> 21) % _LPC_LEGS.length],
-    feet:     'boots',
+    skinTint:  _SKIN_COLS [h1 % _SKIN_COLS.length],
+    hairTint:  _HAIR_COLS [h2 % _HAIR_COLS.length],
+    shirtTint: _SHIRT_COLS[h3 % _SHIRT_COLS.length],
+    pantsTint: _PANTS_COLS[h4 % _PANTS_COLS.length],
+    bodyType:  _LPC_BODY  [h5 % _LPC_BODY.length],
+    hair:      _LPC_HAIR  [h6 % _LPC_HAIR.length],
+    torso:     _LPC_TORSO [h7 % _LPC_TORSO.length],
+    legs:      _LPC_LEGS  [h1 % _LPC_LEGS.length],
+    feet:      'boots',
   };
 }
 // Pas de tinting ColorFilter — on dessine les sprites avec leur couleur native.
@@ -869,7 +763,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       fogA = dist > visionW ? Math.min(0.62, (dist - visionW) / visionSoft) : 0;
     }
 
-    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t, spriteImgs?.tileset);
+    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t, spriteImgs?.isoTiles);
   }
 
   // Champions restants (premier plan)
@@ -971,13 +865,10 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     }
   });
 
-  // ── Colis — rendu désactivé (TODO: mécanique sponsor) ───────────────────
-  // La logique de ramassage est conservée dans SimulateurScreen.
-  // Visuellement, les drops sont cachés jusqu'à implémentation UI sponsor.
+  // ── Colis au sol et parachutes ────────────────────────────────────────────
   const WEAPON_COLORS = { sword:'#bdc3c7', spear:'#95a5a6', bow:'#8e44ad', shield:'#7f8c8d' };
   const allDrops = [...(v.supplies || []), ...(v.loots || [])];
   allDrops.forEach(s => {
-    return; // drops cachés — sponsor mechanic à implémenter
     const sh   = hm ? getElev(s.x, s.y, hm) : 1;
     // Animation de chute étendue (35 ticks, départ haut dans le ciel — descente douce)
     const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
@@ -1190,12 +1081,17 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   }
 
   // ── Faune — sprites animés (4 directions × N frames) ────────────────────
-  // hunt pack (deer/boar/hare) : frameSize=32 | wolf (critters) : frameSize=64
+  // deer/boar/hare : frameSize=32 | wolf : frameSize=64
+  // Vitesse d'animation réaliste par espèce
   const FAUNA_ANIM = {
-    deer:   { idle:'animalDeerIdle', run:'animalDeerRun',   sz:32 },
-    boar:   { idle:'animalBoarIdle', run:'animalBoarRun',   sz:32, attack:'animalBoarAtk' },
-    rabbit: { idle:'animalHareIdle', run:'animalHareRun',   sz:32 },
-    wolf:   { idle:'animalWolfIdle', run:'animalWolfRun',   sz:64, attack:'animalWolfBite' },
+    deer:   { idle:'animalDeerIdle', run:'animalDeerRun', sz:32,
+              idleFps:2, runFps:11, scale:2.4 },
+    boar:   { idle:'animalBoarIdle', run:'animalBoarRun', sz:32,
+              idleFps:2, runFps:8, attack:'animalBoarAtk', atkFps:13, scale:2.1 },
+    rabbit: { idle:'animalHareIdle', run:'animalHareRun', sz:32,
+              idleFps:2, runFps:16, scale:1.5 },  // lapins très rapides
+    wolf:   { idle:'animalWolfIdle', run:'animalWolfRun', sz:64,
+              idleFps:3, runFps:10, attack:'animalWolfBite', atkFps:15, scale:3.6 },
   };
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
@@ -1203,40 +1099,60 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.3);
     const fsx = W/2 + (fix - camIx) * zoom;
     const fsy = H/2 + (fiy - camIy) * zoom;
-    if (fsx < -60 || fsx > W+60 || fsy < -60 || fsy > H+60) return;
+    if (fsx < -80 || fsx > W+80 || fsy < -80 || fsy > H+80) return;
 
     const spec    = FAUNA_ANIM[f.type];
     const dirRow  = f.dirRow ?? 0;
     const isMov   = !!(f.isMoving);
+    const isAtk   = !!(f.isAttacking);
 
-    // ── Sprite animé (ou fallback géométrique si sprite pas encore chargé) ──
-    const spHF  = Math.max(10, zoom * (TILE_H / 2) * (f.type === 'wolf' ? 3.8 : 1.9)); // loups ×2
-    if (spec && spriteImgs[spec.idle]) {
-      const imgKey  = isMov ? (spec.run || spec.idle) : spec.idle;
-      const img     = spriteImgs[imgKey] || spriteImgs[spec.idle];
-      const sz      = spec.sz;
-      const frames  = Math.max(1, Math.floor(img.width() / sz));
-      const fps     = isMov ? 8 : 4;
-      const frameIdx = Math.floor(t * fps) % frames;
+    // Taille proportionnelle au type d'animal
+    const spHF = Math.max(10, zoom * (TILE_H / 2) * (spec?.scale || 2.0));
+    const spWF = spHF;
+
+    // Ombre portée sous l'animal (ellipse aplatie)
+    const shW = spHF * 0.65, shH = spHF * 0.18;
+    _ep.rewind(); _ep.addOval(Skia.XYWHRect(fsx - shW/2, fsy - shH*0.5, shW, shH));
+    canvas.drawPath(_ep, mkAlpha('#000000', 0.30));
+
+    // Sélection animation selon état
+    const fps = isAtk ? (spec?.atkFps || 12)
+              : isMov ? (spec?.runFps  || 8)
+              :         (spec?.idleFps || 3);
+    const imgKey = (isAtk && spec?.attack) ? spec.attack
+                 : isMov ? (spec?.run || spec?.idle)
+                 : spec?.idle;
+    const img = imgKey ? (spriteImgs[imgKey] || (spec && spriteImgs[spec.idle])) : null;
+
+    // Bob vertical : galop pour cerfs, trot pour loups, sautillement pour lapins
+    const frames   = img ? Math.max(1, Math.floor(img.width() / (spec?.sz || 32))) : 1;
+    const frameIdx = Math.floor(t * fps) % frames;
+    const bobAmp   = f.type === 'rabbit' ? 0.10 : f.type === 'deer' ? 0.07 : 0.04;
+    const bob = isMov
+      ? Math.sin((frameIdx / frames) * Math.PI * 2) * spHF * bobAmp
+      : Math.sin(t * 1.4 + (f.id?.charCodeAt(0) || 0)) * spHF * 0.015; // respiration douce idle
+
+    if (spec && img) {
       canvas.drawImageRect(
         img,
-        Skia.XYWHRect(frameIdx * sz, dirRow * sz, sz, sz),
-        Skia.XYWHRect(fsx - spHF/2, fsy - spHF, spHF, spHF),
-        _getSpriteP(0.94)
+        Skia.XYWHRect(frameIdx * spec.sz, dirRow * spec.sz, spec.sz, spec.sz),
+        Skia.XYWHRect(fsx - spWF/2, fsy - spHF + bob, spWF, spHF),
+        _getSpriteP(0.95)
       );
     } else {
-      // Fallback coloré (si sprite pas encore chargé)
-      const fr = Math.max(1.2, zoom * 0.55);
+      // Fallback coloré (sprite pas encore chargé)
+      const fr = Math.max(1.5, zoom * 0.60);
       const fc = f.type==='wolf'?'#4a6060':f.type==='boar'?'#5a3018':f.type==='deer'?'#d4a84b':'#ece8c0';
-      canvas.drawCircle(fsx, fsy - fr, fr * 1.8, mkAlpha(fc, 0.90));
+      canvas.drawCircle(fsx, fsy - fr * 1.2 + bob, fr * 1.8, mkAlpha(fc, 0.90));
+      canvas.drawCircle(fsx + fr * 0.9, fsy - fr * 1.6 + bob, fr * 0.55, mkAlpha(fc, 0.80));
     }
 
     // HP bar si blessé
     if (f.hp != null && f.maxHp != null && f.hp < f.maxHp && zoom > 1.2) {
-      const barW=spHF*0.9, barH=Math.max(2,zoom*1.2), bx=fsx-barW/2, by=fsy-spHF-3;
+      const barW=spHF*0.9, barH=Math.max(2,zoom*1.2), bx=fsx-barW/2, by=fsy-spHF-3+bob;
       canvas.drawRect(Skia.XYWHRect(bx-0.5,by-0.5,barW+1,barH+1), mkAlpha('#000000',0.70));
       canvas.drawRect(Skia.XYWHRect(bx,by,barW,barH), mkAlpha('#330000',0.80));
-      canvas.drawRect(Skia.XYWHRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),barH), mkFill('#ff3030'));
+      canvas.drawRect(Skia.XYWHRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),barH), mkFill('#e74c3c'));
     }
   });
 
@@ -1334,19 +1250,6 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     canvas.drawCircle(psx, psy, Math.max(1, p.r * Math.max(0.4, zoom*0.55)), mkAlpha(p.color, p.life*0.85));
   }
 
-  // ── Cornucopia — lueur dorée au centre au début de partie ────────────────
-  if (v.simPhase === 'cornucopia') {
-    const cx = 50, cy = 50;
-    const { ix: cix, iy: ciy } = wToIso(cx, cy, 1);
-    const csx = W/2 + (cix - camIx)*zoom;
-    const csy = H/2 + (ciy - camIy)*zoom;
-    const pulse = 0.5 + Math.sin(t * 3.5) * 0.5;
-    canvas.drawCircle(csx, csy, 110*zoom, mkAlpha('#e2b96f', 0.06 * pulse));
-    canvas.drawCircle(csx, csy,  70*zoom, mkAlpha('#e2b96f', 0.12 * pulse));
-    canvas.drawCircle(csx, csy,  35*zoom, mkAlpha('#ffe066', 0.24 * pulse));
-    canvas.drawCircle(csx, csy,  12*zoom, mkAlpha('#ffffff', 0.45 * pulse));
-  }
-
   // ── Effets météo ─────────────────────────────────────────────────────────
   const weather = v.weather || 'clear';
   if (weather === 'fog') {
@@ -1406,9 +1309,6 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       const vLabel = `👁 ${followed.name}  ↑${followed.elevation||1}`;
       canvas.drawText(vLabel, 8, 32, mkAlpha('#e2b96f', 0.55), fm);
     }
-    if (v.simPhase === 'cornucopia') {
-      canvas.drawText('⚔️ CORNUCOPIA', W/2 - 36, 22, mkAlpha('#e2b96f', 0.90), fm);
-    }
   }
 
   // ── Minimap 2D (vue haut, en bas à gauche) ────────────────────────────────
@@ -1467,11 +1367,20 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
 
 // ═════════════════════════════════════════════════════════════════════════
-export default function BattleMap({ battleState, onChampionTap }) {
+export default function BattleMap({ battleState, onChampionTap, dropMode, onDropRelease }) {
   const { width: W, height: SH } = useWindowDimensions();
   // Hauteur réelle du canvas (≠ SH qui est la hauteur écran)
   const canvasHRef = useRef(SH);
 
+  // ── Drop targeting (mode sponsor) ────────────────────────────────────────
+  const [dropFingerPos, setDropFingerPos] = useState(null); // {x,y} screen coords
+  const dropModeRef = useRef(dropMode);
+  useEffect(() => { dropModeRef.current = dropMode; }, [dropMode]);
+  const onDropReleaseRef = useRef(onDropRelease);
+  useEffect(() => { onDropReleaseRef.current = onDropRelease; }, [onDropRelease]);
+
+  // ── Tileset isométrique universel (352×352, grille 11×11 de tiles 32×32) ───
+  const imgIsoTiles  = useImage(require('../../assets/sprites/tiles/iso_tiles.png'));
   // ── Sprite personnages (global.png 256×384, 8 cols × 12 rows × 32×32) ─────
   const imgCharSheet = useImage(require('../../assets/sprites/characters/global.png'));
   // ── Animaux (faune) ────────────────────────────────────────────────────────
@@ -1586,10 +1495,11 @@ export default function BattleMap({ battleState, onChampionTap }) {
     if (imgWolfBite)  cur.animalWolfBite = imgWolfBite;
     // Tileset
     if (imgTileset)   cur.tileset        = imgTileset;
+    if (imgIsoTiles)  cur.isoTiles       = imgIsoTiles;
   }, [imgCharSheet,
       imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
       imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
-      imgTileset]);
+      imgTileset, imgIsoTiles]);
 
   // Mise à jour sprites LPC (68 fichiers)
   useEffect(() => {
@@ -1973,8 +1883,28 @@ export default function BattleMap({ battleState, onChampionTap }) {
     };
   }, [battleState]);
 
+  // ── Convertit coordonnées écran → monde ──────────────────────────────
+  const screenToWorld = useCallback((ex, ey) => {
+    const H   = canvasHRef.current > 80 ? canvasHRef.current : SH;
+    const ix  = (ex - W / 2) / zoom.current + camIx.current;
+    const iy  = (ey - H / 2) / zoom.current + camIy.current;
+    const TW2 = TILE_W / 2, TH2 = TILE_H / 2;
+    const gx  = (ix / TW2 + iy / TH2) / 2;
+    const gy  = (iy / TH2 - ix / TW2) / 2;
+    const wx  = Math.max(0, Math.min(100, gx * HM_CELL));
+    const wy  = Math.max(0, Math.min(100, gy * HM_CELL));
+    return { wx, wy };
+  }, [W, SH]);
+
   // ── Tap handler ───────────────────────────────────────────────────────
   const handleTap = useCallback((ex, ey) => {
+    // Drop targeting mode : tap → drop supply
+    if (dropModeRef.current && onDropReleaseRef.current) {
+      const { wx, wy } = screenToWorld(ex, ey);
+      setDropFingerPos(null);
+      onDropReleaseRef.current(wx, wy);
+      return;
+    }
     const H  = canvasHRef.current > 80 ? canvasHRef.current : SH;
     const v  = gvisRef.current;
     const hm = v.heightMap;
@@ -2012,11 +1942,28 @@ export default function BattleMap({ battleState, onChampionTap }) {
 
   // ── Gestes ───────────────────────────────────────────────────────────
   const panGesture = Gesture.Pan()
-    .onStart(() => { savedCam.current = { ix: camIx.current, iy: camIy.current }; })
+    .onStart(e => {
+      savedCam.current = { ix: camIx.current, iy: camIy.current };
+      if (dropModeRef.current) {
+        setDropFingerPos({ x: e.x, y: e.y });
+      }
+    })
     .onUpdate(e => {
+      if (dropModeRef.current) {
+        // En mode drop : le doigt déplace le "viseur", pas la caméra
+        setDropFingerPos({ x: e.x, y: e.y });
+        return;
+      }
       camIx.current = savedCam.current.ix - e.translationX / zoom.current;
       camIy.current = savedCam.current.iy - e.translationY / zoom.current;
       if (gvisRef.current.followId) { gvisRef.current.followId = null; setFollowInfo(null); }
+    })
+    .onEnd(e => {
+      if (dropModeRef.current && onDropReleaseRef.current) {
+        const { wx, wy } = screenToWorld(e.x, e.y);
+        setDropFingerPos(null);
+        onDropReleaseRef.current(wx, wy);
+      }
     })
     .runOnJS(true);
 
@@ -2027,27 +1974,26 @@ export default function BattleMap({ battleState, onChampionTap }) {
       savedCam.current       = { ix: camIx.current, iy: camIy.current };
     })
     .onUpdate(e => {
+      if (dropModeRef.current) return; // pas de zoom en mode drop
       const prevZoom = zoom.current;
       const nz = Math.max(0.4, Math.min(8, savedZoom.current * e.scale));
-      // Ancrage focal : le point sous les doigts doit rester fixe à l'écran
-      // delta cam = focalIso_avant - focalIso_après
-      //           = (focalScreen - center) / prevZoom - (focalScreen - center) / newZoom
       const fx = e.focalX - W / 2;
       const fy = e.focalY - (canvasHRef.current > 80 ? canvasHRef.current : SH) / 2;
       camIx.current += fx / prevZoom - fx / nz;
       camIy.current += fy / prevZoom - fy / nz;
       zoom.current        = nz;
-      targetZoom.current  = nz;  // empêche le lerp de se battre contre le geste
+      targetZoom.current  = nz;
     })
     .runOnJS(true);
 
   const doubleTap = Gesture.Tap().numberOfTaps(2)
     .onEnd(() => {
+      if (dropModeRef.current) return;
       const { ix, iy } = mapCenterIso();
       camIx.current = ix; camIy.current = iy;
       zoom.current = 6.0; targetZoom.current = 6.0;
       gvisRef.current.followId = null;
-      prevFollowId.current = null;  // empêche le zoom-follow de se réactiver
+      prevFollowId.current = null;
       setFollowInfo(null);
     })
     .runOnJS(true);
@@ -2072,21 +2018,55 @@ export default function BattleMap({ battleState, onChampionTap }) {
         </Canvas>
       </GestureDetector>
 
+      {/* ── Overlay cône/ombre en mode drop sponsor ─────────────────── */}
+      {dropMode && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {/* Bannière instruction */}
+          <View style={styles.dropBanner}>
+            <Text style={styles.dropBannerIco}>{dropMode.icon || '📦'}</Text>
+            <Text style={styles.dropBannerTxt}>Touchez la carte pour lancer le colis</Text>
+            <Text style={styles.dropBannerSub}>Glissez pour viser · Relâchez pour larguer</Text>
+          </View>
+          {/* Cône/ombre sous le doigt */}
+          {dropFingerPos && (
+            <View
+              style={[styles.dropTarget, {
+                left: dropFingerPos.x - 38,
+                top:  dropFingerPos.y - 38,
+              }]}
+              pointerEvents="none"
+            >
+              {/* Ombre portée (ellipse) */}
+              <View style={[styles.dropShadowOval, { borderColor: dropMode.color || '#e2b96f' }]} />
+              {/* Cone : triangle pointant vers le bas */}
+              <View style={[styles.dropConeWrap]}>
+                <View style={[styles.dropConeTriangle, {
+                  borderTopColor: (dropMode.color || '#e2b96f') + 'aa',
+                }]} />
+              </View>
+              {/* Icône du colis */}
+              <Text style={styles.dropTargetIco}>{dropMode.icon || '📦'}</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Barre POV ← champion suivi → */}
-      <View style={styles.povBar} pointerEvents="box-none">
-        <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(-1)} activeOpacity={0.75}>
-          <Text style={styles.povBtnTxt}>◀</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.povCenter} onPress={clearFollow} activeOpacity={0.75}>
-          <Text style={styles.povCenterTxt} numberOfLines={1}>
-            {followInfo ? `👁  ${followInfo.name}` : 'Caméra libre'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(1)} activeOpacity={0.75}>
-          <Text style={styles.povBtnTxt}>▶</Text>
-        </TouchableOpacity>
-      </View>
+      {!dropMode && (
+        <View style={styles.povBar} pointerEvents="box-none">
+          <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(-1)} activeOpacity={0.75}>
+            <Text style={styles.povBtnTxt}>◀</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.povCenter} onPress={clearFollow} activeOpacity={0.75}>
+            <Text style={styles.povCenterTxt} numberOfLines={1}>
+              {followInfo ? `👁  ${followInfo.name}` : 'Caméra libre'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.povBtn} onPress={() => cycleFollow(1)} activeOpacity={0.75}>
+            <Text style={styles.povBtnTxt}>▶</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -2118,4 +2098,48 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(226,185,111,0.28)',
   },
   povCenterTxt: { color: '#e2b96f', fontSize: 11, fontWeight: '600' },
+
+  // ── Drop targeting mode ───────────────────────────────────────────────────
+  dropBanner: {
+    position: 'absolute',
+    top: 12, left: 20, right: 20,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    borderRadius: 14,
+    borderWidth: 1, borderColor: 'rgba(226,185,111,0.55)',
+    paddingVertical: 10, paddingHorizontal: 16,
+    alignItems: 'center', gap: 2,
+  },
+  dropBannerIco:  { fontSize: 24 },
+  dropBannerTxt:  { color: '#e2b96f', fontSize: 13, fontWeight: '700' },
+  dropBannerSub:  { color: '#aaa', fontSize: 10 },
+  dropTarget: {
+    position: 'absolute',
+    width: 76, height: 76,
+    alignItems: 'center', justifyContent: 'flex-end',
+  },
+  dropShadowOval: {
+    position: 'absolute',
+    bottom: 4,
+    width: 52, height: 18,
+    borderRadius: 26,
+    backgroundColor: 'rgba(0,0,0,0.30)',
+    borderWidth: 1.5,
+    alignSelf: 'center',
+  },
+  dropConeWrap: {
+    position: 'absolute',
+    bottom: 13,
+    alignItems: 'center',
+  },
+  dropConeTriangle: {
+    width: 0, height: 0,
+    borderLeftWidth: 22, borderLeftColor: 'transparent',
+    borderRightWidth: 22, borderRightColor: 'transparent',
+    borderTopWidth: 44,
+  },
+  dropTargetIco: {
+    position: 'absolute',
+    top: 0,
+    fontSize: 28,
+  },
 });

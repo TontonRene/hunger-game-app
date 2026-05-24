@@ -903,6 +903,7 @@ function createSimState(cfg={}) {
     simPhase: hasCornuco ? 'cornucopia' : 'main',
     weather: 'clear', weatherTick: 0,
     sponsorPts: 15, // points sponsor disponibles
+    packageInventory: { soin:3, festin:2, torch:2, force:1, vitesse:1, armure:1, sword:0, bow:0 },
     highlights: [], caesarLog: [],
     firstBloodDone: false, _alert3: false, _alert2: false,
     matchStats:{ totalCombats:0, totalCrafts:0, waterDeaths:0, alliancesFormed:0, betrayals:0 },
@@ -2923,6 +2924,7 @@ export default function SimulateurScreen() {
   const [narrFilter,   setNarrFilter]  = useState(null);
   const [endOpen,      setEndOpen]     = useState(false);
   const [sponsorTarget,setSponsorTarget]=useState(null);
+  const [selectedPkg,  setSelectedPkg] = useState(null); // { type, label, icon, color } — colis sélectionné pour drop
   const [deathQueue,   setDeathQueue]  = useState([]);      // cartes de mort à afficher
   const [showNarrative,setShowNarrative]=useState(false);   // modal récit complet
   const intRef      = useRef(null);
@@ -3020,20 +3022,19 @@ export default function SimulateurScreen() {
     runChunk();
   },[]);
 
-  const drop = useCallback((type, targetChampId=null, cost=null)=>setSim(p=>{
+  // drop(type, wx, wy) — largue un colis aux coordonnées monde (wx,wy)
+  const drop = useCallback((type, wx=null, wy=null)=>setSim(p=>{
     const s=fastClone(p);
-    const realCost = cost ?? (SUPPLY_LIST.find(sl=>sl.type===type)?.cost ?? 2);
-    if ((s.sponsorPts||0) < realCost) return p;
-    s.sponsorPts = (s.sponsorPts||0) - realCost;
-    if (targetChampId) {
-      const tc = s.champions.find(c=>c.id===targetChampId&&c.hp>0);
-      const tx = tc ? clamp(tc.x+rng(-30,30),ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10);
-      const ty = tc ? clamp(tc.y+rng(-30,30),ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10);
-      s.map.supplies.push({id:`sup_${Date.now()}`,type,x:tx,y:ty,_targeted:targetChampId});
-      s.events.push({type:'event',evType:'sponsor',tick:s.tick,text:`🎁 Colis sponsor pour ${tc?.name||'?'} !`});
-    } else {
-      s.map.supplies.push({id:`sup_${Date.now()}`,type,x:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10),y:rng(ISLAND_EDGE+10,WORLD-ISLAND_EDGE-10)});
-    }
+    // Vérifier inventaire
+    const inv = s.packageInventory || {};
+    if ((inv[type] ?? 0) <= 0) return p;
+    // Décrémenter inventaire
+    s.packageInventory = { ...inv, [type]: (inv[type]||0) - 1 };
+    const dropX = wx != null ? clamp(wx, ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10);
+    const dropY = wy != null ? clamp(wy, ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10) : rng(ISLAND_EDGE+10, WORLD-ISLAND_EDGE-10);
+    const sl2 = SUPPLY_LIST.find(x=>x.type===type);
+    s.map.supplies.push({ id:`sup_${Date.now()}`, type, x:dropX, y:dropY, _dropTick: s.tick });
+    s.events.push({ type:'event', evType:'sponsor', tick:s.tick, text:`🎁 Colis ${sl2?.label||type} largué !` });
     return s;
   }),[]);
 
@@ -3098,7 +3099,17 @@ export default function SimulateurScreen() {
       <View style={[s.root,{flexDirection:'row'}]}>
         {/* ── ZONE GAUCHE : map ─────────────────────────────────────────── */}
         <View style={{flex:1,position:'relative'}}>
-          <BattleMap battleState={sim} onChampionTap={id=>setSelId(prev=>prev===id?null:id)}/>
+          <BattleMap
+            battleState={sim}
+            onChampionTap={id=>{ if(selectedPkg){setSelectedPkg(null);return;} setSelId(prev=>prev===id?null:id); }}
+            dropMode={selectedPkg}
+            onDropRelease={(wx,wy)=>{ drop(selectedPkg.type,wx,wy); setSelectedPkg(null); }}
+          />
+          {selectedPkg&&(
+            <TouchableOpacity style={s.dropCancelBtn} onPress={()=>setSelectedPkg(null)}>
+              <Text style={s.dropCancelTxt}>✕ Annuler</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Bandeau météo/phase en bas de map */}
           <View style={s.lMapBar}>
@@ -3263,9 +3274,9 @@ export default function SimulateurScreen() {
               {panelTab==='sponsor'&&(
                 <SponsorPanel
                   sim={sim} alive={alive} mySimChamp={mySimChamp}
-                  drop={drop} sponsorHeal={sponsorHeal}
-                  sponsorTarget={sponsorTarget} setSponsorTarget={setSponsorTarget}
+                  sponsorHeal={sponsorHeal}
                   active={active} compact
+                  onSelectPackage={pkg=>{ setSelectedPkg(pkg); setPanelTab('events'); }}
                 />
               )}
             </View>
@@ -3295,16 +3306,24 @@ export default function SimulateurScreen() {
       <View style={s.map}>
         <BattleMap
           battleState={sim}
-          onChampionTap={id=>setSelId(prev=>prev===id?null:id)}
+          onChampionTap={id=>{ if(selectedPkg){setSelectedPkg(null);return;} setSelId(prev=>prev===id?null:id); }}
+          dropMode={selectedPkg}
+          onDropRelease={(wx,wy)=>{ drop(selectedPkg.type,wx,wy); setSelectedPkg(null); }}
         />
-        {lastCaesar&&(
+        {/* Bouton annuler le drop */}
+        {selectedPkg&&(
+          <TouchableOpacity style={s.dropCancelBtn} onPress={()=>setSelectedPkg(null)}>
+            <Text style={s.dropCancelTxt}>✕ Annuler</Text>
+          </TouchableOpacity>
+        )}
+        {lastCaesar&&!selectedPkg&&(
           <View style={s.caesarBubble} pointerEvents="none">
             <Text style={s.caesarIco}>🎙</Text>
             <Text style={s.caesarTxt} numberOfLines={2}>{lastCaesar.text}</Text>
           </View>
         )}
         {/* Alerte danger champion du joueur */}
-        {myChampInDanger&&(
+        {myChampInDanger&&!selectedPkg&&(
           <TouchableOpacity style={s.dangerAlert} onPress={()=>setPanelTab('sponsor')}>
             <Text style={s.dangerAlertTxt}>⚠️ {mySimChamp.name} EN DANGER — {Math.round(mySimChamp.hp)}/{mySimChamp.maxHp} PV</Text>
           </TouchableOpacity>
@@ -3454,9 +3473,9 @@ export default function SimulateurScreen() {
       ) : /* sponsor */ (
         <SponsorPanel
           sim={sim} alive={alive} mySimChamp={mySimChamp}
-          drop={drop} sponsorHeal={sponsorHeal}
-          sponsorTarget={sponsorTarget} setSponsorTarget={setSponsorTarget}
+          sponsorHeal={sponsorHeal}
           active={active}
+          onSelectPackage={pkg=>{ setSelectedPkg(pkg); setPanelTab('events'); }}
         />
       )}
 
@@ -3899,13 +3918,12 @@ function MatchStat({l,v}) {
   );
 }
 
-// ── Sponsor Panel ────────────────────────────────────────────────────────
-function SponsorPanel({sim, alive, mySimChamp, drop, sponsorHeal, sponsorTarget, setSponsorTarget, active, compact}) {
+// ── Sponsor Panel — nouveau design : inventaire + drop sur carte ─────────
+function SponsorPanel({sim, alive, mySimChamp, sponsorHeal, active, compact, onSelectPackage}) {
   const pts = sim.sponsorPts || 0;
-  const isDanger = mySimChamp && mySimChamp.hp > 0 && mySimChamp.hp / mySimChamp.maxHp < 0.30;
+  const inv = sim.packageInventory || {};
+  const isDanger   = mySimChamp && mySimChamp.hp > 0 && mySimChamp.hp / mySimChamp.maxHp < 0.30;
   const isCritical = mySimChamp && mySimChamp.hp > 0 && mySimChamp.hp / mySimChamp.maxHp < 0.12;
-
-  // Menaces proches du champion du joueur
   const nearThreats = mySimChamp ? alive.filter(c=>
     c.id!==mySimChamp.id && Math.hypot(c.x-mySimChamp.x, c.y-mySimChamp.y) < 120
   ) : [];
@@ -3936,20 +3954,7 @@ function SponsorPanel({sim, alive, mySimChamp, drop, sponsorHeal, sponsorTarget,
         </View>
       )}
 
-      {/* ── Jauge de points ─────────────────────────────────────────── */}
-      <View style={sp.ptsRow}>
-        <Text style={sp.ptsLabel}>🎭 SPONSOR</Text>
-        <View style={sp.ptsGauge}>
-          <View style={[sp.ptsGaugeFill,{width:`${Math.min(100,pts/30*100)}%`,
-            backgroundColor: pts>=10?'#e2b96f':pts>=5?'#f39c12':'#e74c3c'}]}/>
-        </View>
-        <Text style={[sp.ptsVal, {color: pts>=10?'#e2b96f':pts>=5?'#f39c12':'#e74c3c'}]}>
-          ⭐{Math.floor(pts)}/30
-        </Text>
-      </View>
-      <Text style={sp.ptsRegen}>+0.3/tick — régénération automatique</Text>
-
-      {/* ── Carte de surveillance du champion ───────────────────────── */}
+      {/* ── Surveillance champion ────────────────────────────────────── */}
       {mySimChamp && mySimChamp.hp > 0 && (
         <View style={[sp.champCard, {borderColor: mySimChamp.color+'66'}]}>
           <View style={sp.champCardHead}>
@@ -3958,7 +3963,6 @@ function SponsorPanel({sim, alive, mySimChamp, drop, sponsorHeal, sponsorTarget,
             <Text style={sp.champCardArch}>{ARCH[mySimChamp.archetype]?.icon} {ARCH[mySimChamp.archetype]?.label}</Text>
             <Text style={sp.champCardLv}>Lv{mySimChamp.level||1}</Text>
           </View>
-          {/* HP bar */}
           <View style={sp.champBarRow}>
             <Text style={sp.champBarLbl}>❤️</Text>
             <View style={sp.champBarBg}>
@@ -3969,39 +3973,25 @@ function SponsorPanel({sim, alive, mySimChamp, drop, sponsorHeal, sponsorTarget,
             </View>
             <Text style={sp.champBarVal}>{Math.round(mySimChamp.hp)}</Text>
           </View>
-          {/* Hunger */}
           <View style={sp.champBarRow}>
             <Text style={sp.champBarLbl}>🍗</Text>
-            <View style={sp.champBarBg}>
-              <View style={[sp.champBarFill,{width:`${Math.round(mySimChamp.hunger??100)}%`,backgroundColor:'#e67e22'}]}/>
-            </View>
+            <View style={sp.champBarBg}><View style={[sp.champBarFill,{width:`${Math.round(mySimChamp.hunger??100)}%`,backgroundColor:'#e67e22'}]}/></View>
             <Text style={sp.champBarVal}>{Math.round(mySimChamp.hunger??100)}</Text>
           </View>
-          {/* Thirst */}
           <View style={sp.champBarRow}>
             <Text style={sp.champBarLbl}>💧</Text>
-            <View style={sp.champBarBg}>
-              <View style={[sp.champBarFill,{width:`${Math.round(mySimChamp.thirst??100)}%`,backgroundColor:'#3498db'}]}/>
-            </View>
+            <View style={sp.champBarBg}><View style={[sp.champBarFill,{width:`${Math.round(mySimChamp.thirst??100)}%`,backgroundColor:'#3498db'}]}/></View>
             <Text style={sp.champBarVal}>{Math.round(mySimChamp.thirst??100)}</Text>
           </View>
-          {/* Weapon + activity */}
           <View style={sp.champMeta}>
             <Text style={sp.champMetaTxt}>⚔️ {WEAPON_DEFS[mySimChamp.weapon||'fists']?.name||'Poings'}</Text>
             {mySimChamp._activity?.type&&mySimChamp._activity.type!=='idle'&&(
               <Text style={sp.champMetaTxt}>{actIconSp(mySimChamp._activity.type)}</Text>
             )}
-            {mySimChamp._mentalState&&mySimChamp._mentalState!=='normal'&&(
-              <Text style={sp.champMetaTxt}>{mySimChamp._mentalState==='berserk'?'😡 Rage':mySimChamp._mentalState==='exhausted'?'😴 Épuisé':'😨 Trauma'}</Text>
+            {nearThreats.length>0&&(
+              <Text style={sp.champMetaTxt}>⚠️ {nearThreats.length} ennemi{nearThreats.length>1?'s':''}</Text>
             )}
           </View>
-          {/* Menaces proches */}
-          {nearThreats.length>0&&(
-            <Text style={sp.champThreats}>
-              ⚠️ {nearThreats.length} ennemi{nearThreats.length>1?'s':''} proche{nearThreats.length>1?'s':''} : {nearThreats.slice(0,2).map(t=>t.name).join(', ')}
-            </Text>
-          )}
-          {/* Bouton soins rapides */}
           <TouchableOpacity
             style={[sp.healBtn, pts<5&&{opacity:0.4}]}
             onPress={()=>pts>=5&&sponsorHeal(mySimChamp.id)}>
@@ -4010,41 +4000,39 @@ function SponsorPanel({sim, alive, mySimChamp, drop, sponsorHeal, sponsorTarget,
         </View>
       )}
 
-      {/* ── Ciblage ─────────────────────────────────────────────────── */}
-      <Text style={sp.sectionLbl}>🎯 CIBLER UN CHAMPION</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{marginBottom:8}}>
-        {alive.map(c=>(
-          <TouchableOpacity key={c.id}
-            style={[sp.targetChip, sponsorTarget===c.id&&{borderColor:c.color,backgroundColor:c.color+'22'}]}
-            onPress={()=>setSponsorTarget(t=>t===c.id?null:c.id)}>
-            <View style={[sp.targetDot,{backgroundColor:c.color}]}/>
-            <Text style={[sp.targetName, sponsorTarget===c.id&&{color:c.color}]} numberOfLines={1}>{c.name}</Text>
-            <Text style={sp.targetHp}>{Math.round(c.hp/c.maxHp*100)}%</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      {sponsorTarget&&(
-        <Text style={sp.targetInfo}>
-          🎯 Colis envoyé près de {alive.find(c=>c.id===sponsorTarget)?.name||'?'}
-        </Text>
-      )}
-
-      {/* ── Grille de colis ─────────────────────────────────────────── */}
-      <Text style={sp.sectionLbl}>📦 ENVOYER UN COLIS</Text>
+      {/* ── Inventaire colis ─────────────────────────────────────────── */}
+      <Text style={sp.sectionLbl}>📦 INVENTAIRE — TAPEZ POUR VISER LA CARTE</Text>
       <View style={sp.supGrid}>
-        {SUPPLY_LIST.map(sl=>{
-          const ok = pts >= sl.cost;
+        {SUPPLY_LIST.map(sl => {
+          const qty = inv[sl.type] ?? 0;
+          const available = qty > 0;
           return (
             <TouchableOpacity key={sl.type}
-              style={[sp.supCard, {borderColor:sl.color+'66'}, !ok&&{opacity:0.35}]}
-              onPress={()=>{if(ok){haptic.medium();drop(sl.type,sponsorTarget,sl.cost);}}}>
-              <Text style={[sp.supLabel,{color:sl.color}]}>{sl.label}</Text>
+              style={[sp.supCard, {borderColor: sl.color+'88'}, !available && {opacity:0.30}]}
+              onPress={()=>{
+                if (!available) return;
+                haptic.medium();
+                onSelectPackage({ type:sl.type, label:sl.label, icon: sl.label.split(' ')[0], color:sl.color });
+              }}
+              activeOpacity={available ? 0.70 : 1}
+            >
+              {/* Badge quantité */}
+              <View style={[sp.qtyBadge, { backgroundColor: available ? sl.color : '#333' }]}>
+                <Text style={sp.qtyTxt}>{qty}</Text>
+              </View>
+              <Text style={[sp.supLabel, {color: available ? sl.color : '#555'}]}>{sl.label}</Text>
               <Text style={sp.supDesc}>{sl.desc}</Text>
-              <Text style={[sp.supCost,{color:ok?'#e2b96f':'#555'}]}>{sl.cost}⭐</Text>
+              <Text style={[sp.supHint, {color: available ? '#aaa' : '#444'}]}>
+                {available ? '👆 Toucher pour larguer' : 'Épuisé'}
+              </Text>
             </TouchableOpacity>
           );
         })}
       </View>
+
+      <Text style={sp.inventoryNote}>
+        💡 Les colis dépendent de vos achats en boutique. Tapez sur un colis disponible puis visez la carte pour le larguer avec un parachute.
+      </Text>
     </ScrollView>
   );
 }
@@ -4628,6 +4616,10 @@ const s = StyleSheet.create({
   dangerAlert:{position:'absolute',bottom:4,left:8,right:8,backgroundColor:'#2a0000ee',
     borderRadius:8,padding:8,borderWidth:1,borderColor:'#e74c3c88',alignItems:'center'},
   dangerAlertTxt:{color:'#ff4757',fontSize:11,fontWeight:'bold',letterSpacing:1},
+  dropCancelBtn:{position:'absolute',bottom:10,right:10,backgroundColor:'rgba(0,0,0,0.85)',
+    borderRadius:20,paddingVertical:8,paddingHorizontal:16,
+    borderWidth:1,borderColor:'rgba(226,185,111,0.5)'},
+  dropCancelTxt:{color:'#e2b96f',fontSize:12,fontWeight:'bold'},
 
   statsBar:{flexDirection:'row',backgroundColor:'#111122',paddingVertical:5,paddingHorizontal:6,gap:4},
   chip:{flex:1,alignItems:'center',backgroundColor:'#1a1a2e',borderRadius:7,paddingVertical:4,borderWidth:1,borderColor:'#2a2a4a'},
@@ -5022,13 +5014,27 @@ const sp = StyleSheet.create({
   targetHp:      {color:'#555',fontSize:9},
   targetInfo:    {color:'#e2b96f',fontSize:9,marginBottom:8,fontStyle:'italic'},
 
-  // Grille colis
-  supGrid:       {flexDirection:'row',flexWrap:'wrap',gap:6},
-  supCard:       {width:'47%',backgroundColor:'#111122',borderRadius:10,
-                  padding:10,borderWidth:1,alignItems:'flex-start'},
-  supLabel:      {fontSize:12,fontWeight:'bold',marginBottom:3},
+  // Grille colis — nouveau design inventaire
+  sectionLbl:    {color:'#444',fontSize:9,letterSpacing:1.5,marginBottom:8,marginTop:4},
+  supGrid:       {flexDirection:'row',flexWrap:'wrap',gap:8},
+  supCard:       {width:'47%',backgroundColor:'#111122',borderRadius:12,
+                  padding:10,borderWidth:1.5,alignItems:'flex-start',
+                  position:'relative', overflow:'visible'},
+  supLabel:      {fontSize:12,fontWeight:'bold',marginBottom:3,marginTop:2},
   supDesc:       {color:'#555',fontSize:9,marginBottom:5,lineHeight:13},
   supCost:       {fontSize:11,fontWeight:'bold'},
+  supHint:       {fontSize:9,fontStyle:'italic'},
+
+  // Badge quantité (coin supérieur droit)
+  qtyBadge:      {position:'absolute',top:-7,right:-7,
+                  width:22,height:22,borderRadius:11,
+                  alignItems:'center',justifyContent:'center',
+                  borderWidth:2,borderColor:'#0a0a14'},
+  qtyTxt:        {color:'#fff',fontSize:10,fontWeight:'bold'},
+
+  // Note inventaire
+  inventoryNote: {color:'#333',fontSize:9,marginTop:12,lineHeight:14,
+                  paddingHorizontal:4,fontStyle:'italic'},
 });
 
 // ── Styles écran interviews ───────────────────────────────────────────────

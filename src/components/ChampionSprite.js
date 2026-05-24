@@ -1,12 +1,10 @@
 /**
  * ChampionSprite — Affichage sprite animé d'un champion
- * Utilise global.png (256×384, 8 cols × 12 rows de 32×32)
- * avec rendu en couches (corps, cheveux, haut, ceinture, chaussures, pantalon)
- * et tint couleur par couche.
+ * Utilise LPCSpriteCanvas (Skia) — sprites LPC natifs, 5 couches composées.
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { WebView } from 'react-native-webview';
+import LPCSpriteCanvas from './LPCSpriteCanvas';
 
 // ── Couleurs par archétype ────────────────────────────────────────────────
 const ARCH_COLORS = {
@@ -201,48 +199,37 @@ export default function ChampionSprite({
   name,
   archetype,
   isDead = false,
-  look,          // { skinTint, hairTint, shirtTint, pantsTint } — optionnel
+  look,          // { bodyType, hair, torso, legs, ... } — optionnel
   animState,     // 'idle'|'walk'|'run'|'attack'|'hurt'|'death'
   trainStat,
   height = 220,
   showTag = true,
   style,
 }) {
-  const resolvedLook = look || getLook(name || archetype || 'default');
-  const col  = ARCH_COLORS[archetype] || resolvedLook.shirtTint || '#e2b96f';
-  const anim = isDead  ? 'death'
-    : trainStat ? (STAT_ANIM[trainStat] || 'idle')
-    : animState  || 'idle';
-  const dirOff = 0; // toujours face à droite dans la vue détail
+  const col       = ARCH_COLORS[archetype] || '#e2b96f';
+  // Mapping stat d'entraînement → animation adaptée
+  const anim      = isDead ? 'death'
+    : trainStat   ? (STAT_ANIM[trainStat] || 'idle')
+    : animState   || 'idle';
   const accentCol = trainStat ? (STAT_COLOR[trainStat] || col) : col;
-
-  const html = buildCharHTML({
-    skinTint:  resolvedLook.skinTint,
-    hairTint:  resolvedLook.hairTint,
-    shirtTint: resolvedLook.shirtTint,
-    pantsTint: resolvedLook.pantsTint,
-    animKey:   anim,
-    isDead,
-    dirOff,
-    scale: 1.0,
-  });
+  // Direction : face au joueur (row 2 = droite, LPC natif)
+  const sprWidth  = Math.round(height * 0.75);
 
   return (
     <View style={[styles.container, { height }, style]}>
-      <WebView
-        style={[styles.webview, { backgroundColor: '#0d0d1a' }]}
-        source={{ html }}
-        originWhitelist={['*']}
-        javaScriptEnabled
-        scrollEnabled={false}
-        androidHardwareAccelerationDisabled={false}
-        mixedContentMode="always"
-        cacheEnabled={false}
-        backgroundColor="#0d0d1a"
+      {/* ── Sprite LPC Skia ───────────────────────────────────────────── */}
+      <LPCSpriteCanvas
+        championId={name || archetype || 'default'}
+        look={look}
+        animState={anim}
+        dirRow={2}        /* face droite = row 2 en LPC */
+        width={sprWidth}
+        height={height}
+        bgColor="#0d0d1a"
       />
       {showTag && (
         <View style={styles.tag}>
-          {name   ? <Text style={styles.name}>{name}</Text> : null}
+          {name ? <Text style={styles.name}>{name}</Text> : null}
           {archetype ? (
             <Text style={[styles.arch, { color: col }]}>
               {archetype.toUpperCase()}
@@ -263,8 +250,8 @@ const styles = StyleSheet.create({
   container: {
     borderRadius: 14, overflow: 'hidden', position: 'relative',
     marginBottom: 10, backgroundColor: '#0d0d1a',
+    alignItems: 'center', justifyContent: 'center',
   },
-  webview:   { flex: 1, backgroundColor: '#0d0d1a' },
   tag: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     padding: 8, paddingTop: 5, backgroundColor: '#0d0d1a99',

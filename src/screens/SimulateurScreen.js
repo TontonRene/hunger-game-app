@@ -734,8 +734,8 @@ function generateFauna(biome, mapSeed) {
   const rnd = seededRandGen(mapSeed ^ 0x5a3b7c);
 
   // Nombre total par biome (volontairement modéré)
-  const total = {'forêt':15,'désert':9,'toundra':13,'marais':11,
-                 'montagne':11,'volcan':8,'jungle':14}[biome] ?? 11;
+  const total = {'forêt':8,'désert':5,'toundra':7,'marais':6,
+                 'montagne':6,'volcan':4,'jungle':7}[biome] ?? 6;
 
   // Pool par biome : type, poids relatif, hauteur terrain préférée [hMin, hMax]
   const biomePools = {
@@ -785,8 +785,8 @@ function generateFauna(biome, mapSeed) {
 function generateFlora(biome, mapSeed) {
   const rnd = seededRandGen(mapSeed ^ 0x9f2e4a);
 
-  const total = {'forêt':30,'désert':15,'toundra':20,'marais':26,
-                 'montagne':18,'volcan':13,'jungle':34}[biome] ?? 22;
+  const total = {'forêt':14,'désert':7,'toundra':10,'marais':12,
+                 'montagne':9,'volcan':6,'jungle':16}[biome] ?? 10;
 
   const biomePools = {
     'forêt':    [{t:'berries',w:3,hMin:2,hMax:4},{t:'herbs',w:3,hMin:2,hMax:5},
@@ -2224,6 +2224,7 @@ function tickSim(prev) {
     const nearChamp = aliveChamps.length ? aliveChamps.reduce((p,c)=>dist(c,f)<dist(p,f)?c:p) : null;
     const d = nearChamp ? dist(nearChamp,f) : 999;
 
+    const prevX = f.x, prevY = f.y;
     if (def.aggressive) {
       // Loups/sangliers : attaquent si à portée
       if (nearChamp && d < def.attackRange) {
@@ -2251,6 +2252,10 @@ function tickSim(prev) {
     }
     f.x = clamp(f.x, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     f.y = clamp(f.y, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
+    // Animation : isMoving + direction
+    const dx = f.x - prevX, dy = f.y - prevY;
+    f.isMoving = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+    if (f.isMoving) f.dirRow = dx < 0 ? 1 : 0;
   });
 
   // Chasse : champion à portée d'une proie non-aggressive → kill + nourriture

@@ -512,39 +512,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     }
   }
 
-  // ── Arbre isométrique (forêt/jungle/montagne) ────────────────────────────
-  if (zoom > 1.5 && dimA > 0.25 && h > 0) {
-    const hasTree = (biome === 'forêt'    && r4 < 0.32)
-                 || (biome === 'jungle'   && r4 < 0.44)
-                 || (biome === 'montagne' && h >= 4 && r4 < 0.24);
-    if (hasTree) {
-      const treeX = tx + (r0 - 0.5) * tw * 0.55;
-      const treeY = ty + (r1 - 0.5) * th * 0.45 - th * 0.25;
-      const treeH = Math.max(tz * 0.55, tw * (0.50 + r2 * 0.32));
-      const trunkW = treeH * 0.23;
-      // Tronc
-      _ep.rewind();
-      _ep.addRect(Skia.XYWHRect(treeX - trunkW * 0.4, treeY, trunkW * 0.8, treeH * 0.48));
-      canvas.drawPath(_ep, mkAlpha(biome === 'montagne' ? '#3a3028' : '#5a3210', 0.88 * dimA));
-      if (biome === 'montagne') {
-        // Sapin : 3 cercles en pyramide
-        canvas.drawCircle(treeX, treeY - treeH * 0.13, treeH * 0.27, mkAlpha('#1e3020', 0.78 * dimA));
-        canvas.drawCircle(treeX, treeY - treeH * 0.35, treeH * 0.20, mkAlpha('#1e3020', 0.74 * dimA));
-        canvas.drawCircle(treeX, treeY - treeH * 0.52, treeH * 0.13, mkAlpha('#243828', 0.70 * dimA));
-        // Neige sur sommet
-        canvas.drawCircle(treeX, treeY - treeH * 0.55, treeH * 0.07, mkAlpha('#e8f4ff', 0.55 * dimA));
-      } else {
-        // Feuillage touffu (forêt/jungle)
-        const leafDark  = biome === 'jungle' ? '#0a2408' : '#0e2408';
-        const leafMain  = biome === 'jungle' ? '#1a4010' : '#1c3c12';
-        const leafLight = biome === 'jungle' ? '#30601a' : '#28521a';
-        canvas.drawCircle(treeX,              treeY - treeH * 0.10, treeH * 0.38, mkAlpha(leafDark,  0.72 * dimA));
-        canvas.drawCircle(treeX,              treeY - treeH * 0.10, treeH * 0.29, mkAlpha(leafMain,  0.82 * dimA));
-        canvas.drawCircle(treeX,              treeY - treeH * 0.32, treeH * 0.23, mkAlpha(leafMain,  0.78 * dimA));
-        canvas.drawCircle(treeX - treeH*0.14, treeY - treeH * 0.22, treeH * 0.10, mkAlpha(leafLight, 0.45 * dimA));
-      }
-    }
-  }
+  // Arbres supprimés — rendu tileset seul
 
   // Brume de guerre overlay
   if (fogA > 0.05) {
@@ -935,10 +903,13 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     }
   });
 
-  // ── Colis (supply drops + loots avec animation de chute) ─────────────────
+  // ── Colis — rendu désactivé (TODO: mécanique sponsor) ───────────────────
+  // La logique de ramassage est conservée dans SimulateurScreen.
+  // Visuellement, les drops sont cachés jusqu'à implémentation UI sponsor.
   const WEAPON_COLORS = { sword:'#bdc3c7', spear:'#95a5a6', bow:'#8e44ad', shield:'#7f8c8d' };
   const allDrops = [...(v.supplies || []), ...(v.loots || [])];
   allDrops.forEach(s => {
+    return; // drops cachés — sponsor mechanic à implémenter
     const sh   = hm ? getElev(s.x, s.y, hm) : 1;
     // Animation de chute étendue (35 ticks, départ haut dans le ciel — descente douce)
     const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
@@ -1171,7 +1142,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const isMov   = !!(f.isMoving);
 
     // ── Sprite animé (ou fallback géométrique si sprite pas encore chargé) ──
-    const spHF  = Math.max(10, zoom * (TILE_H / 2) * 1.9);  // ~taille faune
+    const spHF  = Math.max(10, zoom * (TILE_H / 2) * (f.type === 'wolf' ? 3.8 : 1.9)); // loups ×2
     if (spec && spriteImgs[spec.idle]) {
       const imgKey  = isMov ? (spec.run || spec.idle) : spec.idle;
       const img     = spriteImgs[imgKey] || spriteImgs[spec.idle];
@@ -1551,6 +1522,13 @@ export default function BattleMap({ battleState, onChampionTap }) {
         if (fId) {
           // Zoom fort sur le champion (bien centré, bien visible)
           targetZoom.current = 8.0;
+          // Snap immédiat sur le champion (pas de lerp au 1er frame)
+          const fcSnap = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
+          if (fcSnap) {
+            const { ix: six, iy: siy } = wToIso(fcSnap.x, fcSnap.y, 0);
+            camIx.current = six;
+            camIy.current = siy;
+          }
         } else {
           // Retour vue globale → recentrer la caméra sur la map
           targetZoom.current = 6.0;

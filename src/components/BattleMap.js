@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, useImage, BlendMode,
+  PaintStyle, useImage,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -571,18 +571,11 @@ function generateLook(id) {
     pantsTint: _PANTS_COLS[(h >> 9)  % _PANTS_COLS.length],
   };
 }
-// Cache de paints tintés (ColorFilter.MakeBlend Color = hue+sat du tint, luminosité du sprite)
-// BlendMode.Color préserve l'éclairage/ombre du sprite tout en appliquant la couleur du tint.
-// NE PAS utiliser Multiply : le sprite est déjà coloré, Multiply assombrit tout.
-const _tintCache = {};
-function _getTintPaint(hexColor, alpha) {
-  if (!_tintCache[hexColor]) {
-    const p = Skia.Paint();
-    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(hexColor), BlendMode.Color));
-    _tintCache[hexColor] = p;
-  }
-  _tintCache[hexColor].setAlphaf(alpha);
-  return _tintCache[hexColor];
+// Pas de tinting ColorFilter — on dessine les sprites avec leur couleur native.
+// ColorFilter.MakeBlend peut crasher nativement selon l'appareil.
+// _getTintPaint délègue simplement à _getSpriteP (alpha seul).
+function _getTintPaint(_col, alpha) {
+  return _getSpriteP(alpha);
 }
 
 // ── Figurine géométrique améliorée (fallback si pas de sprite) ────────────

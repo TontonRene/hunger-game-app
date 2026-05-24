@@ -530,13 +530,25 @@ const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c'
 const _PANTS_COLS = ['#2c3e50','#4a235a','#1a5276','#145a32','#6e2f0a','#17202a','#7f8c8d','#5d4037'];
 const _HAIR_COLS  = ['#1a0800','#3d1c02','#d4a017','#c05000','#505050','#f0e0c0','#800000','#000000'];
 const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0'];
+// ── LPC look pools ───────────────────────────────────────────────────────
+const _LPC_BODY  = ['male', 'female'];
+const _LPC_HAIR  = ['bob', 'braid', 'bangs', 'afro', 'buzzcut', 'cornrows', 'curly', 'long'];
+const _LPC_TORSO = ['shirt', 'tshirt', 'leather', 'plate'];
+const _LPC_LEGS  = ['pants', 'shorts'];
 function generateLook(id) {
   const h = _hashId(id);
   return {
+    // Champs legacy (fallback charSheet)
     skinTint:  _SKIN_COLS[h          % _SKIN_COLS.length],
     hairTint:  _HAIR_COLS[(h >> 3)   % _HAIR_COLS.length],
     shirtTint: _SHIRT_COLS[(h >> 6)  % _SHIRT_COLS.length],
     pantsTint: _PANTS_COLS[(h >> 9)  % _PANTS_COLS.length],
+    // Champs LPC
+    bodyType: _LPC_BODY [(h >> 12) % _LPC_BODY.length],
+    hair:     _LPC_HAIR [(h >> 15) % _LPC_HAIR.length],
+    torso:    _LPC_TORSO[(h >> 18) % _LPC_TORSO.length],
+    legs:     _LPC_LEGS [(h >> 21) % _LPC_LEGS.length],
+    feet:     'boots',
   };
 }
 // Pas de tinting ColorFilter — on dessine les sprites avec leur couleur native.
@@ -601,86 +613,142 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   shadowP.addOval(Skia.XYWHRect(sx - 7*sc, sy - 1.2*sc, 14*sc, 4.5*sc));
   canvas.drawPath(shadowP, mkAlpha('#000000', 0.28 * baseA));
 
+  const look     = cv.look || {};
+  const bodyType = look.bodyType || 'male';
+  const hairKey  = look.hair     || 'bob';
+  const torsoKey = look.torso    || 'shirt';
+  const legsKey  = look.legs     || 'pants';
+
   // ── Figure morte ──────────────────────────────────────────────────────────
   if (cv.isDead) {
-    const charSheet = spriteImgs?.charSheet;
-    const spH = Math.max(14, zoom * (TILE_H / 2) * 2.2);
-    const dst = Skia.XYWHRect(sx - spH / 2, sy - spH, spH, spH);
-    if (charSheet) {
-      const look = cv.look || {};
-      const fW = charSheet.width() / 8;
-      const fH = charSheet.height() / 12;
-      const gs = (pair) => Skia.XYWHRect(0, pair * 2 * fH, fW, fH);
-      // Couches grisées semi-transparentes (personnage à terre) — même ordre que vivant
-      canvas.drawImageRect(charSheet, gs(0), dst, _getTintPaint(look.skinTint  || '#c09070', 0.28));
-      canvas.drawImageRect(charSheet, gs(5), dst, _getTintPaint(look.pantsTint || '#555555', 0.28));
-      canvas.drawImageRect(charSheet, gs(2), dst, _getTintPaint(look.shirtTint || '#888888', 0.28));
-      canvas.drawImageRect(charSheet, gs(3), dst, _getSpriteP(0.22));
-      canvas.drawImageRect(charSheet, gs(4), dst, _getSpriteP(0.22));
-      canvas.drawImageRect(charSheet, gs(1), dst, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
+    const spH2  = Math.max(14, zoom * (TILE_H / 2) * 2.2);
+    const spW2  = spH2;
+    const dst2  = Skia.XYWHRect(sx - spW2 / 2, sy - spH2, spW2, spH2);
+    const bodyImg2 = spriteImgs?.[`lpc_body_${bodyType}_hurt`];
+    if (bodyImg2) {
+      // Frame 0, direction down (LPC row 3)
+      const src2 = Skia.XYWHRect(0, 3 * 64, 64, 64);
+      const p2   = _getSpriteP(0.28);
+      const dead_layers = [
+        `lpc_body_${bodyType}_hurt`,
+        `lpc_legs_${legsKey}_hurt`,
+        'lpc_feet_boots_hurt',
+        `lpc_torso_${torsoKey}_hurt`,
+        `lpc_hair_${hairKey}_hurt`,
+      ];
+      for (const key of dead_layers) {
+        const img2 = spriteImgs?.[key];
+        if (img2) canvas.drawImageRect(img2, src2, dst2, p2);
+      }
     } else {
-      const ds = Math.max(0.5, zoom * 0.45);
-      const xp = Skia.Path.Make();
-      xp.moveTo(sx-5*ds, sy-2*ds); xp.lineTo(sx+5*ds, sy+4*ds);
-      xp.moveTo(sx+5*ds, sy-2*ds); xp.lineTo(sx-5*ds, sy+4*ds);
-      canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
+      const charSheet = spriteImgs?.charSheet;
+      if (charSheet) {
+        const fW = charSheet.width() / 8;
+        const fH = charSheet.height() / 12;
+        const gs = (pair) => Skia.XYWHRect(0, pair * 2 * fH, fW, fH);
+        canvas.drawImageRect(charSheet, gs(0), dst2, _getTintPaint(look.skinTint  || '#c09070', 0.28));
+        canvas.drawImageRect(charSheet, gs(5), dst2, _getTintPaint(look.pantsTint || '#555555', 0.28));
+        canvas.drawImageRect(charSheet, gs(2), dst2, _getTintPaint(look.shirtTint || '#888888', 0.28));
+        canvas.drawImageRect(charSheet, gs(3), dst2, _getSpriteP(0.22));
+        canvas.drawImageRect(charSheet, gs(4), dst2, _getSpriteP(0.22));
+        canvas.drawImageRect(charSheet, gs(1), dst2, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
+      } else {
+        const ds = Math.max(0.5, zoom * 0.45);
+        const xp = Skia.Path.Make();
+        xp.moveTo(sx-5*ds, sy-2*ds); xp.lineTo(sx+5*ds, sy+4*ds);
+        xp.moveTo(sx+5*ds, sy-2*ds); xp.lineTo(sx-5*ds, sy+4*ds);
+        canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
+      }
     }
     return;
   }
 
-  // ── Sprite animé — global.png layered (8 cols × 12 rows × 32×32) ─────────
+  // ── Sprite animé LPC — 5 couches composées ───────────────────────────────
   const isMoving    = !!cv.isMoving;
   const isAttacking = cv.combatFlash > 0.4;
-  // fps: 0 = idle figé col 0, sinon animation cycl
-  const fps      = isAttacking ? 14 : isMoving ? 8 : 0;
-  const FCOLS    = 8;
-  const frameIdx = fps > 0 ? Math.floor(t * fps) % FCOLS : 0;
-  // Direction : gauche (dirRow=1) → lignes impaires, autres → lignes paires
-  const dirOff   = (cv.dirRow === 1) ? 1 : 0;
+
+  // Animation : slash (attaque), walk (marche), idle (repos)
+  // LPC frame counts : walk=9, idle=2, slash=6
+  let animName, animFps, animFrames;
+  if (isAttacking) {
+    animName = 'slash'; animFps = 12; animFrames = 6;
+  } else if (isMoving) {
+    animName = 'walk';  animFps = 9;  animFrames = 9;
+  } else {
+    animName = 'idle';  animFps = 2;  animFrames = 2;
+  }
+  const frameIdx = Math.floor(t * animFps) % animFrames;
+
+  // Direction LPC : row0=haut, row1=gauche, row2=droite, row3=bas
+  // cv.dirRow     : 0=bas, 1=gauche, 2=droite, 3=haut
+  const _LPC_DIR_MAP = [3, 1, 2, 0];
+  const lpcDirRow = _LPC_DIR_MAP[cv.dirRow ?? 0] ?? 3;
 
   const spH = Math.max(18, zoom * (TILE_H / 2) * 2.6);
   const spW = spH;
   const spX = sx - spW / 2;
   const bob = isMoving ? Math.sin(t * 10 + cv.idx) * 0.8*sc
                        : Math.sin(t * 2  + cv.idx) * 0.3*sc;
-  const spYfinal = sy - spH + bob;   // pieds au niveau du sol (sy)
+  const spYfinal = sy - spH + bob;
 
   let topY  = spYfinal;
   let headR = spW * 0.18;
   let headY = spYfinal + spH * 0.12;
 
-  const charSheet = spriteImgs?.charSheet;
-  if (charSheet) {
-    const look = cv.look || {};
-    const {
-      skinTint  = '#ffe0c8',
-      hairTint  = '#3d1c02',
-      shirtTint = '#e74c3c',
-      pantsTint = '#2c3e50',
-    } = look;
+  const bodyImg = spriteImgs?.[`lpc_body_${bodyType}_${animName}`];
 
-    const fW = charSheet.width()  / FCOLS;   // 32
-    const fH = charSheet.height() / 12;      // 32
-    const dst  = Skia.XYWHRect(spX, spYfinal, spW, spH);
-    const getSrc = (pair) =>
-      Skia.XYWHRect(frameIdx * fW, (pair * 2 + dirOff) * fH, fW, fH);
-
-    // 6 couches dans le bon ordre visuel (bas → haut) :
-    // corps → pantalon → haut → ceinture → chaussures → cheveux
-    canvas.drawImageRect(charSheet, getSrc(0), dst, _getTintPaint(skinTint,  baseA)); // corps
-    canvas.drawImageRect(charSheet, getSrc(5), dst, _getTintPaint(pantsTint, baseA)); // pantalon
-    canvas.drawImageRect(charSheet, getSrc(2), dst, _getTintPaint(shirtTint, baseA)); // haut
-    canvas.drawImageRect(charSheet, getSrc(3), dst, _getSpriteP(baseA));               // ceinture
-    canvas.drawImageRect(charSheet, getSrc(4), dst, _getSpriteP(baseA));               // chaussures
-    canvas.drawImageRect(charSheet, getSrc(1), dst, _getTintPaint(hairTint,  baseA)); // cheveux
-
+  if (bodyImg) {
+    // ── Rendu LPC (5 couches : body → legs → feet → torso → hair) ───────────
+    const LPC_CELL = 64;
+    const srcRect  = Skia.XYWHRect(frameIdx * LPC_CELL, lpcDirRow * LPC_CELL, LPC_CELL, LPC_CELL);
+    const dst      = Skia.XYWHRect(spX, spYfinal, spW, spH);
+    const p        = _getSpriteP(baseA);
+    const lpc_layers = [
+      `lpc_body_${bodyType}_${animName}`,
+      `lpc_legs_${legsKey}_${animName}`,
+      `lpc_feet_boots_${animName}`,
+      `lpc_torso_${torsoKey}_${animName}`,
+      `lpc_hair_${hairKey}_${animName}`,
+    ];
+    for (const key of lpc_layers) {
+      const img = spriteImgs?.[key];
+      if (img) canvas.drawImageRect(img, srcRect, dst, p);
+    }
     // Ring indicateur sous les pieds
     canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
       mkStrokeA(cv.isFollowed ? '#ffffff' : col,
                 cv.isFollowed ? 2.2*sc : 1.1*sc,
                 (cv.isFollowed ? 0.95 : 0.38) * baseA));
+
+  } else if (spriteImgs?.charSheet) {
+    // ── Fallback charSheet (ancien système global.png) ───────────────────────
+    const charSheet = spriteImgs.charSheet;
+    const fps2      = isAttacking ? 14 : isMoving ? 8 : 0;
+    const FCOLS     = 8;
+    const frameIdx2 = fps2 > 0 ? Math.floor(t * fps2) % FCOLS : 0;
+    const dirOff    = (cv.dirRow === 1) ? 1 : 0;
+    const {
+      skinTint  = '#ffe0c8', hairTint  = '#3d1c02',
+      shirtTint = '#e74c3c', pantsTint = '#2c3e50',
+    } = look;
+    const fW = charSheet.width()  / FCOLS;
+    const fH = charSheet.height() / 12;
+    const dst2   = Skia.XYWHRect(spX, spYfinal, spW, spH);
+    const getSrc2 = (pair) =>
+      Skia.XYWHRect(frameIdx2 * fW, (pair * 2 + dirOff) * fH, fW, fH);
+    canvas.drawImageRect(charSheet, getSrc2(0), dst2, _getTintPaint(skinTint,  baseA));
+    canvas.drawImageRect(charSheet, getSrc2(5), dst2, _getTintPaint(pantsTint, baseA));
+    canvas.drawImageRect(charSheet, getSrc2(2), dst2, _getTintPaint(shirtTint, baseA));
+    canvas.drawImageRect(charSheet, getSrc2(3), dst2, _getSpriteP(baseA));
+    canvas.drawImageRect(charSheet, getSrc2(4), dst2, _getSpriteP(baseA));
+    canvas.drawImageRect(charSheet, getSrc2(1), dst2, _getTintPaint(hairTint,  baseA));
+    canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
+      mkStrokeA(cv.isFollowed ? '#ffffff' : col,
+                cv.isFollowed ? 2.2*sc : 1.1*sc,
+                (cv.isFollowed ? 0.95 : 0.38) * baseA));
+
   } else {
-    // Fallback géométrique
+    // ── Fallback géométrique ─────────────────────────────────────────────────
     const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
     headR = geo.headR; headY = geo.headY; topY = geo.topY;
     canvas.drawCircle(sx, headY, headR + 2.4*sc,
@@ -1420,6 +1488,80 @@ export default function BattleMap({ battleState, onChampionTap }) {
   // ── Tileset isométrique ───────────────────────────────────────────────────
   const imgTileset   = useImage(require('../../assets/sprites/tiles/tileset.png'));
 
+  // ── Sprites LPC — body (male + female) × 4 animations ────────────────────
+  const lpcBodyMaleWalk     = useImage(require('../../assets/sprites/lpc/body/male_walk.png'));
+  const lpcBodyMaleIdle     = useImage(require('../../assets/sprites/lpc/body/male_idle.png'));
+  const lpcBodyMaleSlash    = useImage(require('../../assets/sprites/lpc/body/male_slash.png'));
+  const lpcBodyMaleHurt     = useImage(require('../../assets/sprites/lpc/body/male_hurt.png'));
+  const lpcBodyFemaleWalk   = useImage(require('../../assets/sprites/lpc/body/female_walk.png'));
+  const lpcBodyFemaleIdle   = useImage(require('../../assets/sprites/lpc/body/female_idle.png'));
+  const lpcBodyFemaleSlash  = useImage(require('../../assets/sprites/lpc/body/female_slash.png'));
+  const lpcBodyFemaleHurt   = useImage(require('../../assets/sprites/lpc/body/female_hurt.png'));
+  // ── LPC hair — 8 coiffures × 4 animations ────────────────────────────────
+  const lpcHairBobWalk       = useImage(require('../../assets/sprites/lpc/hair/bob_walk.png'));
+  const lpcHairBobIdle       = useImage(require('../../assets/sprites/lpc/hair/bob_idle.png'));
+  const lpcHairBobSlash      = useImage(require('../../assets/sprites/lpc/hair/bob_slash.png'));
+  const lpcHairBobHurt       = useImage(require('../../assets/sprites/lpc/hair/bob_hurt.png'));
+  const lpcHairBraidWalk     = useImage(require('../../assets/sprites/lpc/hair/braid_walk.png'));
+  const lpcHairBraidIdle     = useImage(require('../../assets/sprites/lpc/hair/braid_idle.png'));
+  const lpcHairBraidSlash    = useImage(require('../../assets/sprites/lpc/hair/braid_slash.png'));
+  const lpcHairBraidHurt     = useImage(require('../../assets/sprites/lpc/hair/braid_hurt.png'));
+  const lpcHairBangsWalk     = useImage(require('../../assets/sprites/lpc/hair/bangs_walk.png'));
+  const lpcHairBangsIdle     = useImage(require('../../assets/sprites/lpc/hair/bangs_idle.png'));
+  const lpcHairBangsSlash    = useImage(require('../../assets/sprites/lpc/hair/bangs_slash.png'));
+  const lpcHairBangsHurt     = useImage(require('../../assets/sprites/lpc/hair/bangs_hurt.png'));
+  const lpcHairAfroWalk      = useImage(require('../../assets/sprites/lpc/hair/afro_walk.png'));
+  const lpcHairAfroIdle      = useImage(require('../../assets/sprites/lpc/hair/afro_idle.png'));
+  const lpcHairAfroSlash     = useImage(require('../../assets/sprites/lpc/hair/afro_slash.png'));
+  const lpcHairAfroHurt      = useImage(require('../../assets/sprites/lpc/hair/afro_hurt.png'));
+  const lpcHairBuzzcutWalk   = useImage(require('../../assets/sprites/lpc/hair/buzzcut_walk.png'));
+  const lpcHairBuzzcutIdle   = useImage(require('../../assets/sprites/lpc/hair/buzzcut_idle.png'));
+  const lpcHairBuzzcutSlash  = useImage(require('../../assets/sprites/lpc/hair/buzzcut_slash.png'));
+  const lpcHairBuzzcutHurt   = useImage(require('../../assets/sprites/lpc/hair/buzzcut_hurt.png'));
+  const lpcHairCornrowsWalk  = useImage(require('../../assets/sprites/lpc/hair/cornrows_walk.png'));
+  const lpcHairCornrowsIdle  = useImage(require('../../assets/sprites/lpc/hair/cornrows_idle.png'));
+  const lpcHairCornrowsSlash = useImage(require('../../assets/sprites/lpc/hair/cornrows_slash.png'));
+  const lpcHairCornrowsHurt  = useImage(require('../../assets/sprites/lpc/hair/cornrows_hurt.png'));
+  const lpcHairCurlyWalk     = useImage(require('../../assets/sprites/lpc/hair/curly_walk.png'));
+  const lpcHairCurlyIdle     = useImage(require('../../assets/sprites/lpc/hair/curly_idle.png'));
+  const lpcHairCurlySlash    = useImage(require('../../assets/sprites/lpc/hair/curly_slash.png'));
+  const lpcHairCurlyHurt     = useImage(require('../../assets/sprites/lpc/hair/curly_hurt.png'));
+  const lpcHairLongWalk      = useImage(require('../../assets/sprites/lpc/hair/long_walk.png'));
+  const lpcHairLongIdle      = useImage(require('../../assets/sprites/lpc/hair/long_idle.png'));
+  const lpcHairLongSlash     = useImage(require('../../assets/sprites/lpc/hair/long_slash.png'));
+  const lpcHairLongHurt      = useImage(require('../../assets/sprites/lpc/hair/long_hurt.png'));
+  // ── LPC torso — 4 types × 4 animations ───────────────────────────────────
+  const lpcTorsoShirtWalk    = useImage(require('../../assets/sprites/lpc/torso/shirt_walk.png'));
+  const lpcTorsoShirtIdle    = useImage(require('../../assets/sprites/lpc/torso/shirt_idle.png'));
+  const lpcTorsoShirtSlash   = useImage(require('../../assets/sprites/lpc/torso/shirt_slash.png'));
+  const lpcTorsoShirtHurt    = useImage(require('../../assets/sprites/lpc/torso/shirt_hurt.png'));
+  const lpcTorsoTshirtWalk   = useImage(require('../../assets/sprites/lpc/torso/tshirt_walk.png'));
+  const lpcTorsoTshirtIdle   = useImage(require('../../assets/sprites/lpc/torso/tshirt_idle.png'));
+  const lpcTorsoTshirtSlash  = useImage(require('../../assets/sprites/lpc/torso/tshirt_slash.png'));
+  const lpcTorsoTshirtHurt   = useImage(require('../../assets/sprites/lpc/torso/tshirt_hurt.png'));
+  const lpcTorsoLeatherWalk  = useImage(require('../../assets/sprites/lpc/torso/leather_walk.png'));
+  const lpcTorsoLeatherIdle  = useImage(require('../../assets/sprites/lpc/torso/leather_idle.png'));
+  const lpcTorsoLeatherSlash = useImage(require('../../assets/sprites/lpc/torso/leather_slash.png'));
+  const lpcTorsoLeatherHurt  = useImage(require('../../assets/sprites/lpc/torso/leather_hurt.png'));
+  const lpcTorsoPlateWalk    = useImage(require('../../assets/sprites/lpc/torso/plate_walk.png'));
+  const lpcTorsoPlateIdle    = useImage(require('../../assets/sprites/lpc/torso/plate_idle.png'));
+  const lpcTorsoPlateSlash   = useImage(require('../../assets/sprites/lpc/torso/plate_slash.png'));
+  const lpcTorsoPlateHurt    = useImage(require('../../assets/sprites/lpc/torso/plate_hurt.png'));
+  // ── LPC legs — 2 types × 4 animations ────────────────────────────────────
+  const lpcLegsPantsWalk    = useImage(require('../../assets/sprites/lpc/legs/pants_walk.png'));
+  const lpcLegsPantsIdle    = useImage(require('../../assets/sprites/lpc/legs/pants_idle.png'));
+  const lpcLegsPantsSlash   = useImage(require('../../assets/sprites/lpc/legs/pants_slash.png'));
+  const lpcLegsPantsHurt    = useImage(require('../../assets/sprites/lpc/legs/pants_hurt.png'));
+  const lpcLegsShortsWalk   = useImage(require('../../assets/sprites/lpc/legs/shorts_walk.png'));
+  const lpcLegsShortsIdle   = useImage(require('../../assets/sprites/lpc/legs/shorts_idle.png'));
+  const lpcLegsShortsSlash  = useImage(require('../../assets/sprites/lpc/legs/shorts_slash.png'));
+  const lpcLegsShortsHurt   = useImage(require('../../assets/sprites/lpc/legs/shorts_hurt.png'));
+  // ── LPC feet — boots × 4 animations ─────────────────────────────────────
+  const lpcFeetBootsWalk    = useImage(require('../../assets/sprites/lpc/feet/boots_walk.png'));
+  const lpcFeetBootsIdle    = useImage(require('../../assets/sprites/lpc/feet/boots_idle.png'));
+  const lpcFeetBootsSlash   = useImage(require('../../assets/sprites/lpc/feet/boots_slash.png'));
+  const lpcFeetBootsHurt    = useImage(require('../../assets/sprites/lpc/feet/boots_hurt.png'));
+
   const spriteImgsRef = useRef({});
 
   // Init spriteImgsRef (peuplé par les useImage ci-dessous)
@@ -1448,6 +1590,102 @@ export default function BattleMap({ battleState, onChampionTap }) {
       imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
       imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
       imgTileset]);
+
+  // Mise à jour sprites LPC (68 fichiers)
+  useEffect(() => {
+    const c = spriteImgsRef.current;
+    // body
+    if (lpcBodyMaleWalk)     c['lpc_body_male_walk']      = lpcBodyMaleWalk;
+    if (lpcBodyMaleIdle)     c['lpc_body_male_idle']      = lpcBodyMaleIdle;
+    if (lpcBodyMaleSlash)    c['lpc_body_male_slash']     = lpcBodyMaleSlash;
+    if (lpcBodyMaleHurt)     c['lpc_body_male_hurt']      = lpcBodyMaleHurt;
+    if (lpcBodyFemaleWalk)   c['lpc_body_female_walk']    = lpcBodyFemaleWalk;
+    if (lpcBodyFemaleIdle)   c['lpc_body_female_idle']    = lpcBodyFemaleIdle;
+    if (lpcBodyFemaleSlash)  c['lpc_body_female_slash']   = lpcBodyFemaleSlash;
+    if (lpcBodyFemaleHurt)   c['lpc_body_female_hurt']    = lpcBodyFemaleHurt;
+    // hair
+    if (lpcHairBobWalk)      c['lpc_hair_bob_walk']       = lpcHairBobWalk;
+    if (lpcHairBobIdle)      c['lpc_hair_bob_idle']       = lpcHairBobIdle;
+    if (lpcHairBobSlash)     c['lpc_hair_bob_slash']      = lpcHairBobSlash;
+    if (lpcHairBobHurt)      c['lpc_hair_bob_hurt']       = lpcHairBobHurt;
+    if (lpcHairBraidWalk)    c['lpc_hair_braid_walk']     = lpcHairBraidWalk;
+    if (lpcHairBraidIdle)    c['lpc_hair_braid_idle']     = lpcHairBraidIdle;
+    if (lpcHairBraidSlash)   c['lpc_hair_braid_slash']    = lpcHairBraidSlash;
+    if (lpcHairBraidHurt)    c['lpc_hair_braid_hurt']     = lpcHairBraidHurt;
+    if (lpcHairBangsWalk)    c['lpc_hair_bangs_walk']     = lpcHairBangsWalk;
+    if (lpcHairBangsIdle)    c['lpc_hair_bangs_idle']     = lpcHairBangsIdle;
+    if (lpcHairBangsSlash)   c['lpc_hair_bangs_slash']    = lpcHairBangsSlash;
+    if (lpcHairBangsHurt)    c['lpc_hair_bangs_hurt']     = lpcHairBangsHurt;
+    if (lpcHairAfroWalk)     c['lpc_hair_afro_walk']      = lpcHairAfroWalk;
+    if (lpcHairAfroIdle)     c['lpc_hair_afro_idle']      = lpcHairAfroIdle;
+    if (lpcHairAfroSlash)    c['lpc_hair_afro_slash']     = lpcHairAfroSlash;
+    if (lpcHairAfroHurt)     c['lpc_hair_afro_hurt']      = lpcHairAfroHurt;
+    if (lpcHairBuzzcutWalk)  c['lpc_hair_buzzcut_walk']   = lpcHairBuzzcutWalk;
+    if (lpcHairBuzzcutIdle)  c['lpc_hair_buzzcut_idle']   = lpcHairBuzzcutIdle;
+    if (lpcHairBuzzcutSlash) c['lpc_hair_buzzcut_slash']  = lpcHairBuzzcutSlash;
+    if (lpcHairBuzzcutHurt)  c['lpc_hair_buzzcut_hurt']   = lpcHairBuzzcutHurt;
+    if (lpcHairCornrowsWalk)  c['lpc_hair_cornrows_walk']  = lpcHairCornrowsWalk;
+    if (lpcHairCornrowsIdle)  c['lpc_hair_cornrows_idle']  = lpcHairCornrowsIdle;
+    if (lpcHairCornrowsSlash) c['lpc_hair_cornrows_slash'] = lpcHairCornrowsSlash;
+    if (lpcHairCornrowsHurt)  c['lpc_hair_cornrows_hurt']  = lpcHairCornrowsHurt;
+    if (lpcHairCurlyWalk)    c['lpc_hair_curly_walk']     = lpcHairCurlyWalk;
+    if (lpcHairCurlyIdle)    c['lpc_hair_curly_idle']     = lpcHairCurlyIdle;
+    if (lpcHairCurlySlash)   c['lpc_hair_curly_slash']    = lpcHairCurlySlash;
+    if (lpcHairCurlyHurt)    c['lpc_hair_curly_hurt']     = lpcHairCurlyHurt;
+    if (lpcHairLongWalk)     c['lpc_hair_long_walk']      = lpcHairLongWalk;
+    if (lpcHairLongIdle)     c['lpc_hair_long_idle']      = lpcHairLongIdle;
+    if (lpcHairLongSlash)    c['lpc_hair_long_slash']     = lpcHairLongSlash;
+    if (lpcHairLongHurt)     c['lpc_hair_long_hurt']      = lpcHairLongHurt;
+    // torso
+    if (lpcTorsoShirtWalk)    c['lpc_torso_shirt_walk']    = lpcTorsoShirtWalk;
+    if (lpcTorsoShirtIdle)    c['lpc_torso_shirt_idle']    = lpcTorsoShirtIdle;
+    if (lpcTorsoShirtSlash)   c['lpc_torso_shirt_slash']   = lpcTorsoShirtSlash;
+    if (lpcTorsoShirtHurt)    c['lpc_torso_shirt_hurt']    = lpcTorsoShirtHurt;
+    if (lpcTorsoTshirtWalk)   c['lpc_torso_tshirt_walk']   = lpcTorsoTshirtWalk;
+    if (lpcTorsoTshirtIdle)   c['lpc_torso_tshirt_idle']   = lpcTorsoTshirtIdle;
+    if (lpcTorsoTshirtSlash)  c['lpc_torso_tshirt_slash']  = lpcTorsoTshirtSlash;
+    if (lpcTorsoTshirtHurt)   c['lpc_torso_tshirt_hurt']   = lpcTorsoTshirtHurt;
+    if (lpcTorsoLeatherWalk)  c['lpc_torso_leather_walk']  = lpcTorsoLeatherWalk;
+    if (lpcTorsoLeatherIdle)  c['lpc_torso_leather_idle']  = lpcTorsoLeatherIdle;
+    if (lpcTorsoLeatherSlash) c['lpc_torso_leather_slash'] = lpcTorsoLeatherSlash;
+    if (lpcTorsoLeatherHurt)  c['lpc_torso_leather_hurt']  = lpcTorsoLeatherHurt;
+    if (lpcTorsoPlateWalk)    c['lpc_torso_plate_walk']    = lpcTorsoPlateWalk;
+    if (lpcTorsoPlateIdle)    c['lpc_torso_plate_idle']    = lpcTorsoPlateIdle;
+    if (lpcTorsoPlateSlash)   c['lpc_torso_plate_slash']   = lpcTorsoPlateSlash;
+    if (lpcTorsoPlateHurt)    c['lpc_torso_plate_hurt']    = lpcTorsoPlateHurt;
+    // legs
+    if (lpcLegsPantsWalk)    c['lpc_legs_pants_walk']     = lpcLegsPantsWalk;
+    if (lpcLegsPantsIdle)    c['lpc_legs_pants_idle']     = lpcLegsPantsIdle;
+    if (lpcLegsPantsSlash)   c['lpc_legs_pants_slash']    = lpcLegsPantsSlash;
+    if (lpcLegsPantsHurt)    c['lpc_legs_pants_hurt']     = lpcLegsPantsHurt;
+    if (lpcLegsShortsWalk)   c['lpc_legs_shorts_walk']    = lpcLegsShortsWalk;
+    if (lpcLegsShortsIdle)   c['lpc_legs_shorts_idle']    = lpcLegsShortsIdle;
+    if (lpcLegsShortsSlash)  c['lpc_legs_shorts_slash']   = lpcLegsShortsSlash;
+    if (lpcLegsShortsHurt)   c['lpc_legs_shorts_hurt']    = lpcLegsShortsHurt;
+    // feet
+    if (lpcFeetBootsWalk)    c['lpc_feet_boots_walk']     = lpcFeetBootsWalk;
+    if (lpcFeetBootsIdle)    c['lpc_feet_boots_idle']     = lpcFeetBootsIdle;
+    if (lpcFeetBootsSlash)   c['lpc_feet_boots_slash']    = lpcFeetBootsSlash;
+    if (lpcFeetBootsHurt)    c['lpc_feet_boots_hurt']     = lpcFeetBootsHurt;
+  }, [
+    lpcBodyMaleWalk, lpcBodyMaleIdle, lpcBodyMaleSlash, lpcBodyMaleHurt,
+    lpcBodyFemaleWalk, lpcBodyFemaleIdle, lpcBodyFemaleSlash, lpcBodyFemaleHurt,
+    lpcHairBobWalk, lpcHairBobIdle, lpcHairBobSlash, lpcHairBobHurt,
+    lpcHairBraidWalk, lpcHairBraidIdle, lpcHairBraidSlash, lpcHairBraidHurt,
+    lpcHairBangsWalk, lpcHairBangsIdle, lpcHairBangsSlash, lpcHairBangsHurt,
+    lpcHairAfroWalk, lpcHairAfroIdle, lpcHairAfroSlash, lpcHairAfroHurt,
+    lpcHairBuzzcutWalk, lpcHairBuzzcutIdle, lpcHairBuzzcutSlash, lpcHairBuzzcutHurt,
+    lpcHairCornrowsWalk, lpcHairCornrowsIdle, lpcHairCornrowsSlash, lpcHairCornrowsHurt,
+    lpcHairCurlyWalk, lpcHairCurlyIdle, lpcHairCurlySlash, lpcHairCurlyHurt,
+    lpcHairLongWalk, lpcHairLongIdle, lpcHairLongSlash, lpcHairLongHurt,
+    lpcTorsoShirtWalk, lpcTorsoShirtIdle, lpcTorsoShirtSlash, lpcTorsoShirtHurt,
+    lpcTorsoTshirtWalk, lpcTorsoTshirtIdle, lpcTorsoTshirtSlash, lpcTorsoTshirtHurt,
+    lpcTorsoLeatherWalk, lpcTorsoLeatherIdle, lpcTorsoLeatherSlash, lpcTorsoLeatherHurt,
+    lpcTorsoPlateWalk, lpcTorsoPlateIdle, lpcTorsoPlateSlash, lpcTorsoPlateHurt,
+    lpcLegsPantsWalk, lpcLegsPantsIdle, lpcLegsPantsSlash, lpcLegsPantsHurt,
+    lpcLegsShortsWalk, lpcLegsShortsIdle, lpcLegsShortsSlash, lpcLegsShortsHurt,
+    lpcFeetBootsWalk, lpcFeetBootsIdle, lpcFeetBootsSlash, lpcFeetBootsHurt,
+  ]);
 
   // ── Caméra en espace iso ───────────────────────────────────────────────
   const { ix: defIx, iy: defIy } = mapCenterIso();

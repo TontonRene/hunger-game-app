@@ -9,10 +9,10 @@ import {
   Canvas, Picture, Skia,
   PaintStyle, useImage, BlendMode,
 } from '@shopify/react-native-skia';
-// ClipOp n'est pas re-exporté dans le build public de react-native-skia 2.2.12
-// → on utilise les valeurs numériques directement (Difference=0, Intersect=1)
-const _CLIP_INTERSECT = 1;
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+
+// ClipOp.Intersect=1 (non re-exporté publiquement dans react-native-skia 2.2.12)
+const _CLIP_INTERSECT = 1;
 
 // ── Constantes isométriques ───────────────────────────────────────────────
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)

@@ -6,7 +6,7 @@ import {
 import { useGame } from '../context/GameContext';
 import api from '../utils/api';
 import RadarChart from '../components/RadarChart';
-import ChampionModel from '../components/ChampionModel';
+import ChampionSprite from '../components/ChampionSprite';
 
 const STAT_LABELS = {
   strength: 'Force',
@@ -145,6 +145,13 @@ export default function ChampionScreen() {
                 <Text style={styles.templateName}>{template.name}</Text>
                 <Text style={styles.templateArchetype}>{template.archetype.toUpperCase()}</Text>
               </View>
+              <ChampionSprite
+                archetype={template.archetype}
+                animState="idle"
+                height={160}
+                showTag={false}
+                style={{ marginBottom: 8, borderRadius: 10 }}
+              />
               <RadarChart stats={template.stats} size={120} />
               <View style={styles.templateStatsRow}>
                 {Object.entries(STAT_LABELS).map(([key, label]) => (
@@ -206,8 +213,16 @@ export default function ChampionScreen() {
         </View>
       </View>
 
-      {/* Modèle 3D */}
-      <ChampionModel stats={champion.stats} name={champion.name} archetype={champion.archetype} />
+      {/* Sprite champion */}
+      <ChampionSprite
+        name={champion.name}
+        archetype={champion.archetype}
+        isDead={champion.status === 'dead'}
+        color={champion.color}
+        animState="idle"
+        height={220}
+        showTag
+      />
 
       {/* Radar chart */}
       <View style={styles.chartSection}>

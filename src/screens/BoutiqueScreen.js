@@ -204,7 +204,7 @@ export default function BoutiqueScreen() {
       const ss  = String(elapsed % 60).padStart(2, '0');
       return (
         <View>
-          <TrainingAnimation stat={training.stat} />
+          <TrainingAnimation stat={training.stat} champion={champion} />
 
           <View style={[styles.activeCard, { borderColor: activeMeta?.color + '66' }]}>
             <View style={styles.activeHeader}>

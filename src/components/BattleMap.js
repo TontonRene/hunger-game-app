@@ -389,9 +389,9 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
         _ep.lineTo(tx + tw*0.45, ty + (r1-0.5)*th*0.5);
         canvas.drawPath(_ep, mkStrokeA('#c89850', Math.max(0.6, zoom*0.5), 0.22*dimA));
       } else if (biome === 'toundra') {
-        // Patch de neige
-        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.22, mkAlpha('#d8eeff', 0.32*dimA));
-        canvas.drawCircle(tx + (r2-0.5)*tw*0.35, ty + (r3-0.5)*th*0.35, tw*0.12, mkAlpha('#eef8ff', 0.25*dimA));
+        // Patch de neige (très subtil)
+        canvas.drawCircle(tx + (r0-0.5)*tw*0.4, ty + (r1-0.5)*th*0.4, tw*0.10, mkAlpha('#d8eeff', 0.12*dimA));
+        canvas.drawCircle(tx + (r2-0.5)*tw*0.35, ty + (r3-0.5)*th*0.35, tw*0.06, mkAlpha('#eef8ff', 0.10*dimA));
       } else if (biome === 'marais') {
         // Flaque sombre
         _ep.rewind();
@@ -1003,7 +1003,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
     if (s.type === 'sword') {
       // Épée : lame effilée + garde + poignée
-      canvas.rotate(-35);
+      canvas.rotate(-35, 0, 0);
       const blade = Skia.Path.Make();
       blade.moveTo(0, -r2*3.5); blade.lineTo(r2*0.5, -r2*0.6); blade.lineTo(-r2*0.5, -r2*0.6); blade.close();
       canvas.drawPath(blade, mkAlpha('#d8d8e8', 0.92));
@@ -1012,14 +1012,14 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*0.5, r2*0.56, r2*1.25), mkAlpha('#8a6020', 0.92)); // poignée
     } else if (s.type === 'spear') {
       // Lance : hampe longue + fer de lance
-      canvas.rotate(-55);
+      canvas.rotate(-55, 0, 0);
       canvas.drawRect(Skia.XYWHRect(-r2*0.28, -r2*3.6, r2*0.56, r2*3.8), mkAlpha('#8a6030', 0.90));
       const tip = Skia.Path.Make();
       tip.moveTo(0, -r2*5.0); tip.lineTo(r2*0.65, -r2*3.6); tip.lineTo(-r2*0.65, -r2*3.6); tip.close();
       canvas.drawPath(tip, mkAlpha('#c8d0d8', 0.94));
     } else if (s.type === 'bow') {
       // Arc : courbe + corde
-      canvas.rotate(25);
+      canvas.rotate(25, 0, 0);
       const arc = Skia.Path.Make();
       arc.moveTo(-r2*0.9, -r2*2.4);
       arc.cubicTo(-r2*3.0, -r2*1.0, -r2*3.0, r2*1.0, -r2*0.9, r2*2.4);
@@ -1039,19 +1039,18 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawCircle(0, 0, r2*0.58, mkAlpha('#c8a840', 0.78));
     } else if (s.type === 'soin') {
       // Croix médicale verte (statique)
-      canvas.rotate(0);
       canvas.drawRect(Skia.XYWHRect(-r2*2.0, -r2*0.68, r2*4.0, r2*1.36), mkAlpha('#27ae60', 0.94));
       canvas.drawRect(Skia.XYWHRect(-r2*0.68, -r2*2.0, r2*1.36, r2*4.0), mkAlpha('#27ae60', 0.94));
       canvas.drawRect(Skia.XYWHRect(-r2*1.8, -r2*0.45, r2*3.6, r2*0.90), mkAlpha('#ffffff', 0.28));
     } else if (s.type === 'force') {
       // Haltère rouge
-      canvas.rotate(90);
+      canvas.rotate(90, 0, 0);
       canvas.drawCircle(-r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
       canvas.drawCircle( r2*1.6, 0, r2*1.1, mkAlpha('#e74c3c', 0.92));
       canvas.drawRect(Skia.XYWHRect(-r2*1.6, -r2*0.42, r2*3.2, r2*0.84), mkAlpha('#c0392b', 0.90));
     } else if (s.type === 'vitesse') {
       // Éclair jaune
-      canvas.rotate(-15);
+      canvas.rotate(-15, 0, 0);
       const bolt = Skia.Path.Make();
       bolt.moveTo( r2*0.65, -r2*2.3); bolt.lineTo(-r2*0.42, -r2*0.2); bolt.lineTo( r2*0.85, -r2*0.2);
       bolt.lineTo(-r2*0.65,  r2*2.3); bolt.lineTo( r2*0.42,  r2*0.4); bolt.lineTo(-r2*0.85,  r2*0.4);
@@ -1093,7 +1092,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawCircle(0, 0, r2*0.55, mkAlpha('#6ab04c', 0.80));
     } else if (s.type === 'carte') {
       // Carte dépliée
-      canvas.rotate(-10);
+      canvas.rotate(-10, 0, 0);
       canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkAlpha('#f9ca24', 0.92));
       canvas.drawRect(Skia.XYWHRect(-r2*1.7, -r2*2.1, r2*3.4, r2*4.2), mkStrokeA('#8a7010', Math.max(0.8, zoom*0.5), 0.80));
       for (let li = 0; li < 3; li++) {
@@ -1102,7 +1101,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       }
     } else {
       // Fallback générique : diamant incliné
-      canvas.rotate(45);
+      canvas.rotate(45, 0, 0);
       const dp = Skia.Path.Make();
       dp.moveTo(0, -r2); dp.lineTo(r2, 0); dp.lineTo(0, r2); dp.lineTo(-r2, 0); dp.close();
       canvas.drawPath(dp, mkFill(col));
@@ -1427,28 +1426,6 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   }
 }
 
-// ── Debug overlay (se met à jour toutes les secondes) ────────────────────
-function DebugOverlay({ SH, canvasHRef, zoom, spriteImgsRef }) {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const H  = canvasHRef.current;
-  const z  = Math.round((zoom.current || 0) * 10) / 10;
-  const sp = Object.values(spriteImgsRef.current || {}).filter(Boolean).length;
-  return (
-    <View style={{
-      position:'absolute', top:55, right:4,
-      backgroundColor:'#ff0000', padding:8, borderRadius:8,
-      minWidth:140,
-    }} pointerEvents="none">
-      <Text style={{ color:'#fff', fontSize:13, fontWeight:'bold' }}>🔴 DEBUG v2</Text>
-      <Text style={{ color:'#fff', fontSize:12 }}>SH={SH}  H={H}</Text>
-      <Text style={{ color:'#fff', fontSize:12 }}>zoom={z}  sp={sp}/5</Text>
-    </View>
-  );
-}
 
 // ═════════════════════════════════════════════════════════════════════════
 export default function BattleMap({ battleState, onChampionTap }) {
@@ -1879,8 +1856,6 @@ export default function BattleMap({ battleState, onChampionTap }) {
         </Canvas>
       </GestureDetector>
 
-      {/* DEBUG OVERLAY — à supprimer après vérif */}
-      <DebugOverlay SH={SH} canvasHRef={canvasHRef} zoom={zoom} spriteImgsRef={spriteImgsRef} />
 
       {/* Barre POV ← champion suivi → */}
       <View style={styles.povBar} pointerEvents="box-none">

@@ -7,8 +7,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, useImage, BlendMode, ClipOp,
+  PaintStyle, useImage, BlendMode,
 } from '@shopify/react-native-skia';
+// ClipOp n'est pas re-exporté dans le build public de react-native-skia 2.2.12
+// → on utilise les valeurs numériques directement (Difference=0, Intersect=1)
+const _CLIP_INTERSECT = 1;
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 // ── Constantes isométriques ───────────────────────────────────────────────
@@ -358,7 +361,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     const tIdx = getTileIdx(biome, h, gx, gy);
     const tCol = tIdx % 11, tRow = Math.floor(tIdx / 11);
     canvas.save();
-    canvas.clipPath(_tp, ClipOp.Intersect, true);
+    canvas.clipPath(_tp, _CLIP_INTERSECT, true);
     canvas.drawImageRect(
       tileImg,
       Skia.XYWHRect(tCol * 32, tRow * 32, 32, 32),

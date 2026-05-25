@@ -354,8 +354,37 @@ function _isoTileIdx(biome, h, gx, gy) {
   return base + (rng < 0.40 ? 0 : rng < 0.72 ? 1 : 2);
 }
 
-// ── Dessin d'un cube isométrique — polygones purs (pas de PNG tileset) ───
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, _unused) {
+// Couleurs des flancs (droite/gauche) par rangée du tileset (11 rangées)
+// Chaque rangée = un type de terrain. Les flancs polygon bouchent les trous de hauteur.
+const _CLIFF_R = [
+  '#3d2614', // row0 : terre brune
+  '#2e1e0c', // row1 : terre brune variante
+  '#2e1a0a', // row2 : herbe (flanc marron sous la verdure)
+  '#1c1408', // row3 : végétation dense
+  '#1c1408', // row4 : fleurs
+  '#4a2c18', // row5 : rocher brun
+  '#28334a', // row6 : pierre bleue-grise
+  '#2a2a34', // row7 : cailloux gris
+  '#121218', // row8 : dalle sombre
+  '#0c1428', // row9 : eau profonde (jamais cliff)
+  '#384ea0', // row10: glace / eau claire
+];
+const _CLIFF_L = [
+  '#503020', // row0
+  '#3c2410', // row1
+  '#3c2010', // row2
+  '#241808', // row3
+  '#241808', // row4
+  '#5c3820', // row5
+  '#333e56', // row6
+  '#383840', // row7
+  '#1a1a22', // row8
+  '#101c30', // row9
+  '#4862b8', // row10
+];
+
+// ── Dessin d'un cube isométrique — flancs polygones + PNG tileset par-dessus ─
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
 
@@ -370,19 +399,14 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) return;
 
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
-  const [topC, rightC, leftC] = tileColors(biome, h);
-  const tz = h * TILE_Z * zoom;
+  const tz   = h * TILE_Z * zoom;
 
-  // Face du dessus (losange)
-  _tp.rewind();
-  _tp.moveTo(tx,      ty - th);
-  _tp.lineTo(tx + tw, ty);
-  _tp.lineTo(tx,      ty + th);
-  _tp.lineTo(tx - tw, ty);
-  _tp.close();
-  canvas.drawPath(_tp, mkAlpha(topC, dimA));
+  const tIdx  = _isoTileIdx(biome, h, gx, gy);
+  const tRow  = Math.floor(tIdx / 11);
+  const cliffR = _CLIFF_R[Math.min(tRow, _CLIFF_R.length - 1)];
+  const cliffL = _CLIFF_L[Math.min(tRow, _CLIFF_L.length - 1)];
 
-  // Flancs (cliff) — comblent les trous entre hauteurs différentes
+  // ── 1) Flancs polygones (AVANT le PNG) — bouchent les trous de hauteur ───
   if (h > 0 && tz > 0.5) {
     _rp.rewind();
     _rp.moveTo(tx,      ty + th);
@@ -390,7 +414,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     _rp.lineTo(tx + tw, ty + tz);
     _rp.lineTo(tx,      ty + th + tz);
     _rp.close();
-    canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
+    canvas.drawPath(_rp, mkAlpha(cliffR, 0.98 * dimA));
 
     _lp.rewind();
     _lp.moveTo(tx - tw, ty);
@@ -398,10 +422,26 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     _lp.lineTo(tx,      ty + th + tz);
     _lp.lineTo(tx - tw, ty + tz);
     _lp.close();
-    canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
+    canvas.drawPath(_lp, mkAlpha(cliffL, 0.98 * dimA));
   }
 
-  // Eau animée h=0
+  // ── 2) PNG tileset PAR-DESSUS (dessus texturé + flanc de base du tile) ───
+  if (isoTilesImg) {
+    const srcCol = tIdx % 11;
+    const srcRow = Math.floor(tIdx / 11);
+    const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
+    const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
+    canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
+  } else {
+    // Fallback : face du dessus polygone si l'image n'est pas encore chargée
+    const [topC] = tileColors(biome, h);
+    _tp.rewind();
+    _tp.moveTo(tx, ty - th); _tp.lineTo(tx + tw, ty);
+    _tp.lineTo(tx, ty + th); _tp.lineTo(tx - tw, ty); _tp.close();
+    canvas.drawPath(_tp, mkAlpha(topC, dimA));
+  }
+
+  // ── 3) Eau animée (h=0) ──────────────────────────────────────────────────
   if (h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
     const r0 = _tileRng(gx, gy, 0);
     for (let wi = 0; wi < 2; wi++) {
@@ -414,7 +454,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     }
   }
 
-  // Brume de guerre
+  // ── 4) Brume de guerre ───────────────────────────────────────────────────
   if (fogA > 0.05) {
     canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
   }

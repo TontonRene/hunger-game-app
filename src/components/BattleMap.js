@@ -434,62 +434,6 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   }
 }
 
-// ── 1) Flancs polygones (AVANT le PNG) — bouchent les trous de hauteur ───
-  /*
-  if (h > 0 && tz > 0.5) {
-    _rp.rewind();
-    _rp.moveTo(tx,      ty + th);
-    _rp.lineTo(tx + tw, ty);
-    _rp.lineTo(tx + tw, ty + tz);
-    _rp.lineTo(tx,      ty + th + tz);
-    _rp.close();
-    canvas.drawPath(_rp, mkAlpha(cliffR, 0.98 * dimA));
-
-    _lp.rewind();
-    _lp.moveTo(tx - tw, ty);
-    _lp.lineTo(tx,      ty + th);
-    _lp.lineTo(tx,      ty + th + tz);
-    _lp.lineTo(tx - tw, ty + tz);
-    _lp.close();
-    canvas.drawPath(_lp, mkAlpha(cliffL, 0.98 * dimA));
-  }
-  */
-
-  // ── 2) PNG tileset PAR-DESSUS (dessus texturé + flanc de base du tile) ───
-  if (isoTilesImg) {
-    const srcCol = tIdx % 11;
-    const srcRow = Math.floor(tIdx / 11);
-    const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
-    const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
-    canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
-  } else {
-    // Fallback : face du dessus polygone si l'image n'est pas encore chargée
-    const [topC] = tileColors(biome, h);
-    _tp.rewind();
-    _tp.moveTo(tx, ty - th); _tp.lineTo(tx + tw, ty);
-    _tp.lineTo(tx, ty + th); _tp.lineTo(tx - tw, ty); _tp.close();
-    canvas.drawPath(_tp, mkAlpha(topC, dimA));
-  }
-
-  // ── 3) Eau animée (h=0) ──────────────────────────────────────────────────
-  if (h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
-    const r0 = _tileRng(gx, gy, 0);
-    for (let wi = 0; wi < 2; wi++) {
-      const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
-      const ringA = (1 - phase) * 0.18 * dimA;
-      if (ringA < 0.010) continue;
-      const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
-      _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
-      canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom * 0.28), ringA));
-    }
-  }
-
-// ── 4) Brume de guerre ───────────────────────────────────────────────────
-  // if (fogA > 0.05) {
-  //   canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
-  // }
-
-
 // ── Look déterministe par champion ───────────────────────────────────────
 function _hashId(id) {
   let h = 0; const s = String(id || '');

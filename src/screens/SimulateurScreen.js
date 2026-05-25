@@ -107,7 +107,6 @@ const FLORA_DEFS = {
 
 // ── POIs — coordonnées ×3 + nouveaux POIs pour grande map ────────────────
 const BASE_POIS = [
-  { id:'cornucopia', name:'Cornucopia',     icon:'⚡', x:900,  y:900,  radius:108, effect:'loot'    },
   { id:'caves',      name:'Grottes',        icon:'🌑', x:330,  y:360,  radius:132, effect:'shelter' },
   { id:'ruins',      name:'Ruines',         icon:'🏚', x:1410, y:510,  radius:108, effect:'craft'   },
   { id:'river',      name:'Rivière',        icon:'🌊', x:630,  y:1140, radius:96,  effect:'water'   },
@@ -867,40 +866,18 @@ function createSimState(cfg={}) {
   const names      = (cfg.champNames||CHAMP_NAMES).slice(0,count);
   const sizeCfg    = MAP_SIZES[cfg.mapSize||'M'];
   const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne','volcan','jungle'][rng(0,6)];
-  const hasCornuco = cfg.cornucopia !== false; // activé par défaut
   const mapSeed    = Date.now() % 999983;
 
-  // Champions : spawn centre si cornucopia, sinon carte entière
-  const cornRange = [760, 1040];
   const champs    = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,
-    hasCornuco ? cornRange : sizeCfg.spawn,
+    sizeCfg.spawn,
     cfg.champBuilds?.[i]?.traits || null));
-
-  // faunaCount/floraCount gérés en interne par generateFauna/generateFlora
-
-  // Loots de la cornucopia + loots dispersés
-  const cornuLoots = hasCornuco ? Array.from({length:Math.min(count,12)},(_,i)=>({
-    id:`corn_${i}`,
-    x: 900 + rng(-120, 120),
-    y: 900 + rng(-120, 120),
-    type:['sword','spear','bow','shield','soin','soin','armure','festin','force','vitesse'][i%10],
-    // Pas de _dropTick : Cornucopia items déjà au sol dès le début
-  })) : [];
-
-  const scatterLoots = Array.from({length:6+count},(_,i)=>({
-    id:`loot_${i}`,
-    x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
-    y:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
-    type:['sword','spear','bow','shield','soin','soin','armure','festin'][i%8],
-    // Pas de _dropTick : les loots dispersés sont déjà au sol dès le début
-  }));
 
   return {
     id:'sim_local', tick:0, status:'active', winner:null,
     events:[], narrative:[],
     dayPhase:0, alliances:[], activeEvent:null,
     lastEventTick:0,
-    simPhase: hasCornuco ? 'cornucopia' : 'main',
+    simPhase: 'main',
     weather: 'clear', weatherTick: 0,
     sponsorPts: 15, // points sponsor disponibles
     packageInventory: { soin:3, festin:2, torch:2, force:1, vitesse:1, armure:1, sword:0, bow:0 },
@@ -912,7 +889,7 @@ function createSimState(cfg={}) {
       width:WORLD, height:WORLD,
       mapSeed,
       pois:BASE_POIS.map(p=>({...p, _uses:0, _depleted:false})),
-      loots:[...cornuLoots, ...scatterLoots],
+      loots:[],
       supplies:[], traps:[], corpses:[],
       fauna:    generateFauna(biome, mapSeed),
       flora:    generateFlora(biome, mapSeed),
@@ -1846,12 +1823,6 @@ function tickSim(prev) {
     return state;
   }
 
-  // ── Phase Cornucopia → transition vers main ───────────────────────────
-  if (state.simPhase === 'cornucopia' && state.tick >= 18) {
-    state.simPhase = 'main';
-    events.push({type:'event',evType:'cornucopia_end',tick:state.tick,
-      text:`⚔️ La Cornucopia est terminée ! Les survivants fuient dans l'arène.`});
-  }
 
   // ── Météo ─────────────────────────────────────────────────────────────
   tickWeather(state, events);
@@ -2162,26 +2133,8 @@ function tickSim(prev) {
     // Speed via DR : speed=10 ne donne plus 10 cases/tick mais 8 (DR plafonne)
     const spd = Math.max(1, dr(c._eff.speed)) * stormSlow * nightSlow * weatherSlow * obstSlow;
 
-    // ── Phase Cornucopia : IA rush vers centre + combat agressif ──────
     let dx, dy;
-    if (state.simPhase === 'cornucopia') {
-      const center = {x:900, y:900};
-      const distC  = dist(c, center);
-      const enemies = alive.filter(e=>e.id!==c.id&&e.hp>0);
-      const nearest = enemies.length?enemies.reduce((p,e)=>dist(e,c)<dist(p,c)?e:p):null;
-      const isFighter = ['berserker','gladiator','soldier'].includes(c.archetype);
-      if (nearest && dist(nearest,c) < 160 && (isFighter||Math.random()<0.5)) {
-        // Combat cornucopia agressif
-        const t2 = nearest;
-        dx = sign(t2.x-c.x)||noise(1); dy = sign(t2.y-c.y)||noise(1);
-      } else if (distC > 80) {
-        // Foncer vers la cornucopia
-        dx = sign(center.x-c.x); dy = sign(center.y-c.y);
-      } else {
-        // Sur place : grab supplies
-        dx = noise(1); dy = noise(1);
-      }
-    } else {
+    {
       const r = aiMove(c, alive, null, state.map.supplies, state.map.pois, isNight, state.alliances, state.activeEvent, state.map.fauna, state.map.flora, state.tick, state.map.corpses, state.map.biome);
       dx = r.dx; dy = r.dy;
     }
@@ -3128,7 +3081,6 @@ export default function SimulateurScreen() {
           <View style={s.lMapBar}>
             <Text style={s.lMapBarTxt}>{timeIcon} J{Math.floor(sim.tick/DAY_LEN)+1}</Text>
             <Text style={s.lMapBarTxt}>{WEATHER_TYPES[sim.weather]?.icon||'☀️'} {WEATHER_TYPES[sim.weather]?.label||'Dégagé'}</Text>
-            {sim.simPhase==='cornucopia'&&<Text style={[s.lMapBarTxt,{color:'#e2b96f'}]}>⚔️ CORNUCOPIA</Text>}
             <Text style={s.lMapBarTxt}>{alive.length} vivants</Text>
             {sim.alliances.length>0&&<Text style={s.lMapBarTxt}>🤝{sim.alliances.length}</Text>}
           </View>
@@ -3358,9 +3310,7 @@ export default function SimulateurScreen() {
         {sim.weather&&sim.weather!=='clear'
           ? <Chip val={`${WEATHER_TYPES[sim.weather]?.icon} ${WEATHER_TYPES[sim.weather]?.label}`} lbl="Météo" color="#74b9ff" small/>
           : <Chip val="☀️" lbl="Météo" small/>}
-        {sim.simPhase==='cornucopia'
-          ? <Chip val="⚔️ CORNUCOPIA" lbl="Phase" color="#e2b96f"/>
-          : <Chip val={sim.map.biome} lbl="Biome" small/>}
+        <Chip val={sim.map.biome} lbl="Biome" small/>
         {sim.alliances.length>0&&<Chip val={`🤝${sim.alliances.length}`} lbl="Alliances" color="#e2b96f"/>}
       </View>
 
@@ -4330,7 +4280,6 @@ function ConfigScreen({onStart}) {
   const [names,       setNames]      = useState([...CHAMP_NAMES.slice(0,8)]);
   const [editIdx,     setEditIdx]    = useState(null);
   const [editVal,     setEditVal]    = useState('');
-  const [cornucopia,  setCornucopia] = useState(true); // cérémonie d'ouverture
   // builds[i] = { traits: string[] } — un build par champion
   const [builds,      setBuilds]     = useState(()=>Array.from({length:8},()=>({traits:pickTraits()})));
   const [traitPicker, setTraitPicker]= useState(null); // index du champion en cours d'édition
@@ -4373,7 +4322,7 @@ function ConfigScreen({onStart}) {
     });
   };
 
-  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names, champBuilds:builds, cornucopia});
+  const launch = () => onStart({champCount:count, mapSize, biome, champNames:names, champBuilds:builds});
 
   // Données du picker actuellement ouvert
   const pickerBuild = traitPicker !== null ? builds[traitPicker] : null;
@@ -4445,17 +4394,6 @@ function ConfigScreen({onStart}) {
 
       {/* ── Options de partie ───────────────────────────────────────── */}
       <Text style={cs.sec}>OPTIONS DE PARTIE</Text>
-      <TouchableOpacity style={[cs.optionRow, cornucopia && cs.optionRowOn]}
-        onPress={()=>setCornucopia(v=>!v)}>
-        <Text style={cs.optionIco}>⚔️</Text>
-        <View style={{flex:1}}>
-          <Text style={[cs.optionLbl, cornucopia&&cs.optionLblOn]}>Cérémonie Cornucopia</Text>
-          <Text style={cs.optionDesc}>Tous les tributs spawn au centre — ruée initiale vers les ressources</Text>
-        </View>
-        <View style={[cs.toggle, cornucopia&&cs.toggleOn]}>
-          <Text style={cs.toggleTxt}>{cornucopia?'ON':'OFF'}</Text>
-        </View>
-      </TouchableOpacity>
 
       {/* ── Traits des tributs ───────────────────────────────────────── */}
       <Text style={cs.sec}>TRAITS DES TRIBUTS <Text style={cs.secSub}>(budget : {BASE_TRAIT_POINTS} pts → 0)</Text></Text>

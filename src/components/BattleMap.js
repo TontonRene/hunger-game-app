@@ -684,23 +684,6 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
                 (cv.isFollowed ? 1.0 : 0.45) * baseA));
   }
 
-  // ── Visage unique — dessiné APRÈS tous les sprites, garanti visible ────────
-  {
-    const fR = Math.max(5 * sc, headR * 1.1);
-    // Fond opaque couleur champion (identifiant, impossible à rater)
-    canvas.drawCircle(sx, headY - fR * 0.30, fR * 1.40,
-      mkAlpha(col, baseA * 0.72));
-    // Cheveux
-    canvas.drawCircle(sx, headY - fR * 0.52, fR * 1.10,
-      mkAlpha(look.hairTint, baseA * 0.98));
-    // Peau
-    canvas.drawCircle(sx, headY + fR * 0.10, fR * 0.78,
-      mkAlpha(look.skinTint, baseA * 0.98));
-    // Contour noir pour contraste
-    canvas.drawCircle(sx, headY - fR * 0.30, fR * 1.40,
-      mkStrokeA('#000000', Math.max(1.0, 1.2 * sc), baseA * 0.60));
-  }
-
   // ── Status effects visuels ────────────────────────────────────────────────
   const se = cv.se || [];
   if (se.includes('bleed')) {

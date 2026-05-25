@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, useWindowDimensions } from 'react-native';
 import {
   Canvas, Picture, Skia,
-  PaintStyle, useImage,
+  PaintStyle, BlendMode, useImage,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -325,17 +325,26 @@ function _tileRng(gx, gy, idx) {
 
 // ── Table de tiles par biome — iso_tiles.png (352×352, grille 11×11, 32×32/tile)
 // Index i → col=i%11, row=floor(i/11)
-// row0=terre brune, row1=terre sombre/pierre, row2=herbe, row3=végétation dense
-// row4=fleurs/déco, row5=rochers bruns, row6=rochers gris, row7=eau peu profonde
-// row8=eau bleue, row9=eau profonde/marine, row10=glace/neige
+// row0 (0-10)  : terre brune plate
+// row1 (11-21) : terre brune variante
+// row2 (22-32) : herbe verte sur terre
+// row3 (33-43) : végétation dense
+// row4 (44-54) : fleurs / plantes colorées
+// row5 (55-65) : rochers bruns
+// row6 (66-76) : pierres plates bleues/grises
+// row7 (77-87) : cailloux gris
+// row8 (88-98) : dalles sombres
+// row9 (99-109): eau profonde (losange bleu)
+// row10(110-114): eau claire / glace
 const _BTILES = {
-  'forêt':    [98, 11, 12, 22, 23, 30, 38, 39],
-  'désert':   [98,  0,  1,  2,  3,  4,  5,  3],
-  'toundra':  [104, 110, 111, 112, 110, 111, 112, 110],
-  'marais':   [98, 22, 11, 33, 38, 40, 33, 38],
-  'montagne': [98,  0,  1, 11, 22, 12, 22, 11],
-  'volcan':   [98,  0,  0,  1,  2,  3,  2,  0],
-  'jungle':   [98, 22, 33, 40, 38, 41, 33, 22],
+  //          h0   h1   h2   h3   h4   h5   h6   h7
+  'forêt':   [ 99,   0,   1,  22,  22,  33,  33,  55],
+  'désert':  [ 99,   0,   0,   1,   1,  11,  55,  55],
+  'toundra': [110,  88,  88,  66,  66,  77,  77,  55],
+  'marais':  [ 99,  88,   0,  22,  22,  33,  66,  77],
+  'montagne':[ 99,   0,  11,  55,  55,  66,  66,  77],
+  'volcan':  [ 99,   0,   0,   1,  11,  55,  55,  66],
+  'jungle':  [ 99,  22,  22,  33,  33,  44,  44,  55],
 };
 function _isoTileIdx(biome, h, gx, gy) {
   const arr = _BTILES[biome] || _BTILES['forêt'];
@@ -482,8 +491,19 @@ function generateLook(id) {
     feet:      'boots',
   };
 }
-// _getTintPaint — utilisé par le fallback charSheet, alpha uniquement
-function _getTintPaint(_col, alpha) { return _getSpriteP(alpha); }
+// _getTintPaint — applique une teinte couleur via ColorFilter.MakeBlend(Modulate)
+// Fonctionne dans PictureRecorder contrairement à saveLayer+BlendMode
+function _getTintPaint(col, alpha) {
+  if (!col) return _getSpriteP(alpha);
+  try {
+    const p = Skia.Paint();
+    p.setAlphaf(Math.max(0, Math.min(1, alpha)));
+    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(col), BlendMode.Modulate));
+    return p;
+  } catch (_) {
+    return _getSpriteP(alpha);
+  }
+}
 
 // ── Figurine géométrique améliorée (fallback si pas de sprite) ────────────
 function _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col) {

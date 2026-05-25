@@ -116,24 +116,6 @@ function tileColors(biome, h) {
   return pal[idx];
 }
 
-// ── Index tile depuis le spritesheet (grille 11×11 de tiles 32×32) ────────
-// Rangées observées : 0-1=terre, 2-3=herbe, 4=plantes, 5=rochers bruns,
-// 6=cailloux gris, 7=glace/neige, 8=eau claire, 9=eau sombre, 10=eau/glace
-const TILE_IDX = {
-  'forêt':    { lo:[22,32], hi:[33,43] },
-  'jungle':   { lo:[33,43], hi:[44,54] },
-  'marais':   { lo:[0, 10], hi:[55,65] },
-  'montagne': { lo:[55,65], hi:[66,76] },
-  'toundra':  { lo:[66,76], hi:[77,87] },
-  'désert':   { lo:[11,21], hi:[11,21] },
-  'volcan':   { lo:[55,65], hi:[55,65] },
-};
-function getTileIdx(biome, h, gx, gy) {
-  if (h === 0) return 99 + Math.abs(gx * 7 + gy * 13) % 10;  // eau sombre
-  const rng = (TILE_IDX[biome] || TILE_IDX['forêt']);
-  const r   = h >= 3 ? rng.hi : rng.lo;
-  return r[0] + Math.abs(gx * 7 + gy * 13) % (r[1] - r[0] + 1);
-}
 
 // ── Génération procédurale de rivières sur la heightmap ───────────────────
 function addRivers(hm, biome, rng) {
@@ -218,6 +200,22 @@ function clientHeightMap(biome, seed) {
   }
   // Ajouter des rivières procédurales
   addRivers(hm, biome, rng);
+  // Slope limiting : différence max 1 entre cases voisines → plus aucun trou vertical
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let gy = 0; gy < HM_CELLS; gy++) {
+      for (let gx = 0; gx < HM_CELLS; gx++) {
+        [[gx+1,gy],[gx-1,gy],[gx,gy+1],[gx,gy-1]].forEach(([nx,ny]) => {
+          if (nx < 0 || nx >= HM_CELLS || ny < 0 || ny >= HM_CELLS) return;
+          if (hm[gy][gx] - hm[ny][nx] > 1) {
+            hm[gy][gx] = hm[ny][nx] + 1;
+            changed = true;
+          }
+        });
+      }
+    }
+  }
   _HM_CACHE[key] = hm;
   return hm;
 }
@@ -326,7 +324,10 @@ function _tileRng(gx, gy, idx) {
 }
 
 // ── Table de tiles par biome — iso_tiles.png (352×352, grille 11×11, 32×32/tile)
-// Index i → col=i%11, row=floor(i/11) — row0=terre, row1-3=herbe, row8=eau, row10=neige
+// Index i → col=i%11, row=floor(i/11)
+// row0=terre brune, row1=terre sombre/pierre, row2=herbe, row3=végétation dense
+// row4=fleurs/déco, row5=rochers bruns, row6=rochers gris, row7=eau peu profonde
+// row8=eau bleue, row9=eau profonde/marine, row10=glace/neige
 const _BTILES = {
   'forêt':    [98, 11, 12, 22, 23, 30, 38, 39],
   'désert':   [98,  0,  1,  2,  3,  4,  5,  3],
@@ -357,7 +358,8 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   const tW = tw * 2;   // = TILE_W * zoom
   const tH = tW;       // image carrée
 
-  if (tx < -tW || tx > W + tW || ty < -tH || ty > H + tH) return;
+  const tzCull = h * TILE_Z * zoom;
+  if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) return;
 
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
 
@@ -368,6 +370,41 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     const srcRow = Math.floor(tIdx / 11);
     const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
     const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
+
+    // ── Polygones AVANT le tile PNG ─────────────────────────────────────────
+    // 3 faces opaque : bouchent les coins transparents du PNG ET les trous
+    // entre tiles de hauteurs différentes.
+    const [topC, rightC, leftC] = tileColors(biome, h);
+    const tz = h * TILE_Z * zoom;
+    // 1) Face du dessus (losange) — remplit les coins transparents du PNG carré
+    _tp.rewind();
+    _tp.moveTo(tx,      ty - th);
+    _tp.lineTo(tx + tw, ty);
+    _tp.lineTo(tx,      ty + th);
+    _tp.lineTo(tx - tw, ty);
+    _tp.close();
+    canvas.drawPath(_tp, mkAlpha(topC, dimA));
+    // 2) Flanc droit + flanc gauche (cliff) — comblent les espaces vides en Z
+    if (h > 0 && tz > 0.5) {
+      // Face droite : (tx,ty+th) → (tx+tw,ty) → (tx+tw,ty+tz) → (tx,ty+th+tz)
+      _rp.rewind();
+      _rp.moveTo(tx,      ty + th);
+      _rp.lineTo(tx + tw, ty);
+      _rp.lineTo(tx + tw, ty + tz);
+      _rp.lineTo(tx,      ty + th + tz);
+      _rp.close();
+      canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
+      // Face gauche : (tx-tw,ty) → (tx,ty+th) → (tx,ty+th+tz) → (tx-tw,ty+tz)
+      _lp.rewind();
+      _lp.moveTo(tx - tw, ty);
+      _lp.lineTo(tx,      ty + th);
+      _lp.lineTo(tx,      ty + th + tz);
+      _lp.lineTo(tx - tw, ty + tz);
+      _lp.close();
+      canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
+    }
+
+    // Tile PNG par-dessus les polygones (dessus texturé + flanc de base)
     canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
 
     // Eau animée par-dessus le tile h=0
@@ -416,7 +453,7 @@ function _hashId(id) {
 }
 const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#ff6b9d','#00b894','#fd79a8','#6c5ce7','#e84393'];
 const _PANTS_COLS = ['#2c3e50','#4a235a','#1a5276','#145a32','#6e2f0a','#17202a','#7f8c8d','#5d4037'];
-const _HAIR_COLS  = ['#1a0800','#3d1c02','#d4a017','#c05000','#505050','#f0e0c0','#800000','#000000'];
+const _HAIR_COLS  = ['#d4a017','#c87941','#f5deb3','#a0522d','#cd853f','#deb887','#b8860b','#e07b39'];
 const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0'];
 // ── LPC look pools ───────────────────────────────────────────────────────
 const _LPC_BODY  = ['male', 'female'];
@@ -445,12 +482,8 @@ function generateLook(id) {
     feet:      'boots',
   };
 }
-// Pas de tinting ColorFilter — on dessine les sprites avec leur couleur native.
-// ColorFilter.MakeBlend peut crasher nativement selon l'appareil.
-// _getTintPaint délègue simplement à _getSpriteP (alpha seul).
-function _getTintPaint(_col, alpha) {
-  return _getSpriteP(alpha);
-}
+// _getTintPaint — utilisé par le fallback charSheet, alpha uniquement
+function _getTintPaint(_col, alpha) { return _getSpriteP(alpha); }
 
 // ── Figurine géométrique améliorée (fallback si pas de sprite) ────────────
 function _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col) {
@@ -507,7 +540,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   shadowP.addOval(Skia.XYWHRect(sx - 7*sc, sy - 1.2*sc, 14*sc, 4.5*sc));
   canvas.drawPath(shadowP, mkAlpha('#000000', 0.28 * baseA));
 
-  const look     = cv.look || {};
+  const look     = cv.look || generateLook(cv.id);
   const bodyType = look.bodyType || 'male';
   const hairKey  = look.hair     || 'bob';
   const torsoKey = look.torso    || 'shirt';
@@ -586,8 +619,8 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   const spYfinal = sy - spH + bob;
 
   let topY  = spYfinal;
-  let headR = spW * 0.18;
-  let headY = spYfinal + spH * 0.12;
+  let headR = spW * 0.20;
+  let headY = spYfinal + spH * 0.15;
 
   const bodyImg = spriteImgs?.[`lpc_body_${bodyType}_${animName}`];
 
@@ -611,8 +644,8 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     // Ring indicateur sous les pieds
     canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
       mkStrokeA(cv.isFollowed ? '#ffffff' : col,
-                cv.isFollowed ? 2.2*sc : 1.1*sc,
-                (cv.isFollowed ? 0.95 : 0.38) * baseA));
+                cv.isFollowed ? 2.2*sc : 1.3*sc,
+                (cv.isFollowed ? 0.95 : 0.55) * baseA));
 
   } else if (spriteImgs?.charSheet) {
     // ── Fallback charSheet (ancien système global.png) ───────────────────────
@@ -651,6 +684,23 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
                 (cv.isFollowed ? 1.0 : 0.45) * baseA));
   }
 
+  // ── Visage unique — dessiné APRÈS tous les sprites, garanti visible ────────
+  {
+    const fR = Math.max(5 * sc, headR * 1.1);
+    // Fond opaque couleur champion (identifiant, impossible à rater)
+    canvas.drawCircle(sx, headY - fR * 0.30, fR * 1.40,
+      mkAlpha(col, baseA * 0.72));
+    // Cheveux
+    canvas.drawCircle(sx, headY - fR * 0.52, fR * 1.10,
+      mkAlpha(look.hairTint, baseA * 0.98));
+    // Peau
+    canvas.drawCircle(sx, headY + fR * 0.10, fR * 0.78,
+      mkAlpha(look.skinTint, baseA * 0.98));
+    // Contour noir pour contraste
+    canvas.drawCircle(sx, headY - fR * 0.30, fR * 1.40,
+      mkStrokeA('#000000', Math.max(1.0, 1.2 * sc), baseA * 0.60));
+  }
+
   // ── Status effects visuels ────────────────────────────────────────────────
   const se = cv.se || [];
   if (se.includes('bleed')) {
@@ -675,6 +725,9 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   const bw = 26*sc, bh = 3.2*sc;
   const bx = sx - bw / 2;
   const by = (topY !== undefined ? topY : headY - headR) - 8*sc;
+
+  // Bande couleur unique du champion (identifiant visuel garanti au-dessus de la HP bar)
+  canvas.drawRect(Skia.XYWHRect(bx, by - bh * 0.9, bw, bh * 0.65), mkAlpha(col, baseA * 0.92));
 
   canvas.drawRect(Skia.XYWHRect(bx-1, by-1, bw+2, bh+2), mkAlpha('#000000', 0.80));
   const hpRatio = Math.max(0, cv.hp / cv.maxHp);
@@ -871,7 +924,8 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   allDrops.forEach(s => {
     const sh   = hm ? getElev(s.x, s.y, hm) : 1;
     // Animation de chute étendue (35 ticks, départ haut dans le ciel — descente douce)
-    const tickDiff = s._dropTick != null ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
+    const isSupply = typeof s.id === 'string' && s.id.startsWith('sup_');
+    const tickDiff = (isSupply && s._dropTick != null) ? Math.max(0, (v.tick || 0) - s._dropTick) : 999;
     const falling  = tickDiff < 35;
     const fallH    = falling ? Math.max(0, sh + 28 - tickDiff * 0.8) : sh + 0.6;
     const { ix, iy } = wToIso(s.x, s.y, fallH);
@@ -1085,13 +1139,13 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   // Vitesse d'animation réaliste par espèce
   const FAUNA_ANIM = {
     deer:   { idle:'animalDeerIdle', run:'animalDeerRun', sz:32,
-              idleFps:2, runFps:11, scale:2.4 },
+              idleFps:2, runFps:7, scale:2.4 },   // galop fluide ~7fps
     boar:   { idle:'animalBoarIdle', run:'animalBoarRun', sz:32,
-              idleFps:2, runFps:8, attack:'animalBoarAtk', atkFps:13, scale:2.1 },
+              idleFps:2, runFps:6, attack:'animalBoarAtk', atkFps:10, scale:2.1 },
     rabbit: { idle:'animalHareIdle', run:'animalHareRun', sz:32,
-              idleFps:2, runFps:16, scale:1.5 },  // lapins très rapides
+              idleFps:2, runFps:11, scale:1.5 },  // lapins : plus vifs que cerf
     wolf:   { idle:'animalWolfIdle', run:'animalWolfRun', sz:64,
-              idleFps:3, runFps:10, attack:'animalWolfBite', atkFps:15, scale:3.6 },
+              idleFps:3, runFps:7, attack:'animalWolfBite', atkFps:12, scale:3.6 },
   };
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
@@ -1126,7 +1180,13 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
     // Bob vertical : galop pour cerfs, trot pour loups, sautillement pour lapins
     const frames   = img ? Math.max(1, Math.floor(img.width() / (spec?.sz || 32))) : 1;
-    const frameIdx = Math.floor(t * fps) % frames;
+    // Phase individuelle — hash complet de l'ID pour éviter la synchro entre fauna_0..9
+    // (fauna_0 à fauna_9 ont même 1er char et même longueur → l'ancienne formule donnait le même fSeed)
+    const _fid = String(f.id || '');
+    let _fh = 0;
+    for (let _si = 0; _si < _fid.length; _si++) _fh = ((_fh * 31) + _fid.charCodeAt(_si)) | 0;
+    const fSeed    = (Math.abs(_fh) % 10000) * 0.001;  // 0–10 range, unique par ID
+    const frameIdx = Math.floor((t + fSeed) * fps) % frames;
     const bobAmp   = f.type === 'rabbit' ? 0.10 : f.type === 'deer' ? 0.07 : 0.04;
     const bob = isMov
       ? Math.sin((frameIdx / frames) * Math.PI * 2) * spHF * bobAmp
@@ -1394,9 +1454,6 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
   const imgWolfIdle  = useImage(require('../../assets/sprites/animals/wolf_idle.png'));
   const imgWolfRun   = useImage(require('../../assets/sprites/animals/wolf_run.png'));
   const imgWolfBite  = useImage(require('../../assets/sprites/animals/wolf_bite.png'));
-  // ── Tileset isométrique ───────────────────────────────────────────────────
-  const imgTileset   = useImage(require('../../assets/sprites/tiles/tileset.png'));
-
   // ── Sprites LPC — body (male + female) × 4 animations ────────────────────
   const lpcBodyMaleWalk     = useImage(require('../../assets/sprites/lpc/body/male_walk.png'));
   const lpcBodyMaleIdle     = useImage(require('../../assets/sprites/lpc/body/male_idle.png'));
@@ -1494,12 +1551,11 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     if (imgWolfRun)   cur.animalWolfRun  = imgWolfRun;
     if (imgWolfBite)  cur.animalWolfBite = imgWolfBite;
     // Tileset
-    if (imgTileset)   cur.tileset        = imgTileset;
     if (imgIsoTiles)  cur.isoTiles       = imgIsoTiles;
   }, [imgCharSheet,
       imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
       imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
-      imgTileset, imgIsoTiles]);
+      imgIsoTiles]);
 
   // Mise à jour sprites LPC (68 fichiers)
   useEffect(() => {
@@ -1734,6 +1790,11 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
         cv.y = cv.prevY + (cv.ty - cv.prevY) * alpha;
         if (cv.combatFlash > 0) cv.combatFlash = Math.max(0, cv.combatFlash - dtSec);
       });
+      // Interpolation linéaire de la faune (même principe que les champions)
+      gvisRef.current.fauna?.forEach(fv => {
+        fv.x = fv.prevX + ((fv.tx ?? fv.x) - fv.prevX) * alpha;
+        fv.y = fv.prevY + ((fv.ty ?? fv.y) - fv.prevY) * alpha;
+      });
 
       // Rendu Skia — utilise la vraie hauteur canvas (pas la hauteur écran)
       const H = canvasHRef.current > 80 ? canvasHRef.current : SH;
@@ -1872,7 +1933,17 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
             if (adx >= ady) fDir = fdx >= 0 ? 2 : 1;
             else            fDir = fdy >= 0 ? 0 : 3;
           }
-          return { ...f, x: fx, y: fy, dirRow: fDir, isMoving: fmov > 0.05 };
+          return {
+            ...f,
+            x:     pf ? pf.x : fx,   // position visuelle (à interpoler)
+            y:     pf ? pf.y : fy,
+            prevX: pf ? pf.x : fx,   // point de départ de l'interpolation
+            prevY: pf ? pf.y : fy,
+            tx: fx, ty: fy,          // cible (coordonnées sim)
+            dirRow: fDir,
+            // Double vérification : différence visuelle OU flag du simulateur
+            isMoving: fmov > 0.05 || !!f.isMoving,
+          };
         });
       })(),
       flora:         (battleState.map?.flora || []).filter(f => !f.collected).map(f => ({ ...f, x: f.x * sX, y: f.y * sY })),

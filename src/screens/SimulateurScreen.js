@@ -884,7 +884,7 @@ function createSimState(cfg={}) {
     x: 900 + rng(-120, 120),
     y: 900 + rng(-120, 120),
     type:['sword','spear','bow','shield','soin','soin','armure','festin','force','vitesse'][i%10],
-    _dropTick: 0,
+    // Pas de _dropTick : Cornucopia items déjà au sol dès le début
   })) : [];
 
   const scatterLoots = Array.from({length:6+count},(_,i)=>({
@@ -892,7 +892,7 @@ function createSimState(cfg={}) {
     x:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
     y:rng(ISLAND_EDGE+30, WORLD-ISLAND_EDGE-30),
     type:['sword','spear','bow','shield','soin','soin','armure','festin'][i%8],
-    _dropTick: hasCornuco ? 20 + i * 3 : i * 4, // loot dispersé apparaît après cornucopia
+    // Pas de _dropTick : les loots dispersés sont déjà au sol dès le début
   }));
 
   return {
@@ -2235,27 +2235,40 @@ function tickSim(prev) {
           text:`est attaqué(e) par un ${def.label} (−${dmg} PV) !`});
         if (nearChamp.hp <= 0) events.push({type:'death',champion:nearChamp.id,name:nearChamp.name,killedBy:'fauna',killedByName:def.label});
         // Mouvement vers la proie
-        if (d > 3) { f.x+=sign(nearChamp.x-f.x)*def.speed*0.5; f.y+=sign(nearChamp.y-f.y)*def.speed*0.5; }
-      } else if (nearChamp && d < 120) {
-        f.x += sign(nearChamp.x-f.x)*def.speed*0.3+noise(1);
-        f.y += sign(nearChamp.y-f.y)*def.speed*0.3+noise(1);
+        if (d > 3) { f.x+=sign(nearChamp.x-f.x)*def.speed*5; f.y+=sign(nearChamp.y-f.y)*def.speed*5; }
+      } else if (nearChamp && d < 180) {
+        f.x += sign(nearChamp.x-f.x)*def.speed*4+noise(3);
+        f.y += sign(nearChamp.y-f.y)*def.speed*4+noise(3);
       } else {
-        f.x += noise(2); f.y += noise(2);
+        // Déambulation : cible persistante pour éviter le surplace
+        if (!f._wX || !f._wY || Math.hypot(f.x-f._wX, f.y-f._wY) < 60) {
+          f._wX = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
+          f._wY = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
+        }
+        // *6 au lieu de *3 : mouvement clairement visible sur la carte
+        f.x += sign(f._wX-f.x)*def.speed*6 + noise(4);
+        f.y += sign(f._wY-f.y)*def.speed*6 + noise(4);
       }
     } else {
-      // Cerfs/lapins : fuient si proche
+      // Cerfs/lapins : fuient si proche, sinon déambulent vers cible
       if (nearChamp && d < def.fearRange) {
-        f.x += sign(f.x - nearChamp.x)*def.speed*0.5+noise(1);
-        f.y += sign(f.y - nearChamp.y)*def.speed*0.5+noise(1);
+        f.x += sign(f.x - nearChamp.x)*def.speed*5+noise(3);
+        f.y += sign(f.y - nearChamp.y)*def.speed*5+noise(3);
       } else {
-        f.x += noise(2); f.y += noise(2);
+        if (!f._wX || !f._wY || Math.hypot(f.x-f._wX, f.y-f._wY) < 60) {
+          f._wX = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
+          f._wY = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
+        }
+        // *6 au lieu de *3 : mouvement clairement visible sur la carte
+        f.x += sign(f._wX-f.x)*def.speed*6 + noise(4);
+        f.y += sign(f._wY-f.y)*def.speed*6 + noise(4);
       }
     }
     f.x = clamp(f.x, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     f.y = clamp(f.y, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     // Animation : isMoving + direction
     const dx = f.x - prevX, dy = f.y - prevY;
-    f.isMoving = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+    f.isMoving = Math.abs(dx) > 2 || Math.abs(dy) > 2;
     if (f.isMoving) f.dirRow = dx < 0 ? 1 : 0;
   });
 
@@ -2335,7 +2348,7 @@ function tickSim(prev) {
   });
 
   // Collecte colis / loots
-  const allDrops = [...(state.map.supplies||[]), ...(state.map.loots||[]).filter(l=>l._dropTick!=null && state.tick >= l._dropTick)];
+  const allDrops = [...(state.map.supplies||[]), ...(state.map.loots||[]).filter(l=>l._dropTick==null || state.tick >= l._dropTick)];
   const collectedIds = new Set();
   allDrops.forEach(s=>{
     if (collectedIds.has(s.id)) return;

@@ -2162,7 +2162,7 @@ const styles = StyleSheet.create({
   povBtnTxt:   { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
   povCenter: {
     flex: 1, maxWidth: 170,
-    backgroundColor: 'rgba(255,0,0,0.90)',
+    backgroundColor: 'rgba(0,100,255,0.90)',
     borderRadius: 22,
     paddingHorizontal: 14, paddingVertical: 7,
     alignItems: 'center',

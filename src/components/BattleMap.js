@@ -649,18 +649,39 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const LPC_CELL = 64;
     const srcRect  = Skia.XYWHRect(frameIdx * LPC_CELL, lpcDirRow * LPC_CELL, LPC_CELL, LPC_CELL);
     const dst      = Skia.XYWHRect(spX, spYfinal, spW, spH);
-    const p        = _getSpriteP(baseA);
-    const lpc_layers = [
-      `lpc_body_${bodyType}_${animName}`,
-      `lpc_legs_${legsKey}_${animName}`,
-      `lpc_feet_boots_${animName}`,
-      `lpc_torso_${torsoKey}_${animName}`,
-      `lpc_hair_${hairKey}_${animName}`,
+    const {
+      skinTint  = '#e8c49a', hairTint  = '#3d1c02',
+      shirtTint = '#e74c3c', pantsTint = '#2c3e50',
+    } = look;
+    // Couches avec teintes individuelles
+    const lpc_layer_paints = [
+      [  `lpc_body_${bodyType}_${animName}`, _getTintPaint(skinTint,  baseA) ],
+      [  `lpc_legs_${legsKey}_${animName}`,  _getTintPaint(pantsTint, baseA) ],
+      [  `lpc_feet_boots_${animName}`,       _getSpriteP(baseA)              ],
+      [  `lpc_torso_${torsoKey}_${animName}`,_getTintPaint(shirtTint, baseA) ],
+      [  `lpc_hair_${hairKey}_${animName}`,  _getTintPaint(hairTint,  baseA) ],
     ];
-    for (const key of lpc_layers) {
+    for (const [key, paint] of lpc_layer_paints) {
       const img = spriteImgs?.[key];
-      if (img) canvas.drawImageRect(img, srcRect, dst, p);
+      if (img) canvas.drawImageRect(img, srcRect, dst, paint);
     }
+    // ── Visage dessiné PAR-DESSUS les sprites LPC (garantit la visibilité) ──
+    const faceR  = spW * 0.18;            // rayon du visage
+    const faceX  = sx;
+    const faceY  = spYfinal + spH * 0.14; // haut du sprite = zone tête
+    headY = faceY; headR = faceR;         // pour la HP bar
+    topY  = faceY - faceR;
+    // Contour sombre
+    canvas.drawCircle(faceX, faceY, faceR + 1.2*sc, mkAlpha('#2a1a0a', 0.75 * baseA));
+    // Peau
+    canvas.drawCircle(faceX, faceY, faceR, mkAlpha(skinTint, baseA));
+    // Yeux
+    const eyeR = Math.max(0.8, faceR * 0.20);
+    const eyeOff = faceR * 0.32;
+    canvas.drawCircle(faceX - eyeOff, faceY - faceR * 0.10, eyeR, mkAlpha('#1a0a00', 0.90 * baseA));
+    canvas.drawCircle(faceX + eyeOff, faceY - faceR * 0.10, eyeR, mkAlpha('#1a0a00', 0.90 * baseA));
+    // Cheveux (bande colorée sur le dessus de la tête)
+    canvas.drawCircle(faceX, faceY - faceR * 0.55, faceR * 0.72, mkAlpha(hairTint, 0.85 * baseA));
     // Ring indicateur sous les pieds
     canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
       mkStrokeA(cv.isFollowed ? '#ffffff' : col,
@@ -2165,7 +2186,7 @@ const styles = StyleSheet.create({
   povBtnTxt:   { color: '#e2b96f', fontSize: 13, fontWeight: 'bold' },
   povCenter: {
     flex: 1, maxWidth: 170,
-    backgroundColor: 'rgba(0,100,255,0.90)',
+    backgroundColor: 'rgba(15,20,35,0.90)',
     borderRadius: 22,
     paddingHorizontal: 14, paddingVertical: 7,
     alignItems: 'center',

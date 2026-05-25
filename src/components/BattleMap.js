@@ -406,7 +406,8 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   const cliffR = _CLIFF_R[Math.min(tRow, _CLIFF_R.length - 1)];
   const cliffL = _CLIFF_L[Math.min(tRow, _CLIFF_L.length - 1)];
 
-  // ── 1) Flancs polygones (AVANT le PNG) — bouchent les trous de hauteur ───
+// ── 1) Flancs polygones (AVANT le PNG) — bouchent les trous de hauteur ───
+  /*
   if (h > 0 && tz > 0.5) {
     _rp.rewind();
     _rp.moveTo(tx,      ty + th);
@@ -424,6 +425,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     _lp.close();
     canvas.drawPath(_lp, mkAlpha(cliffL, 0.98 * dimA));
   }
+  */
 
   // ── 2) PNG tileset PAR-DESSUS (dessus texturé + flanc de base du tile) ───
   if (isoTilesImg) {
@@ -454,10 +456,10 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     }
   }
 
-  // ── 4) Brume de guerre ───────────────────────────────────────────────────
-  if (fogA > 0.05) {
-    canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
-  }
+// ── 4) Brume de guerre ───────────────────────────────────────────────────
+  // if (fogA > 0.05) {
+  //   canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
+  // }
 }
 
 // ── Look déterministe par champion ───────────────────────────────────────
@@ -721,16 +723,16 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
                 cv.isFollowed ? 2.2*sc : 1.1*sc,
                 (cv.isFollowed ? 0.95 : 0.38) * baseA));
 
-  } else {
+} else {
     // ── Fallback géométrique ─────────────────────────────────────────────────
-    const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
-    headR = geo.headR; headY = geo.headY; topY = geo.topY;
-    canvas.drawCircle(sx, headY, headR + 2.4*sc,
-      mkStrokeA(cv.isFollowed ? '#ffffff' : col,
-                cv.isFollowed ? 2.2*sc : 1.2*sc,
-                (cv.isFollowed ? 1.0 : 0.45) * baseA));
+    // const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
+    // headR = geo.headR; headY = geo.headY; topY = geo.topY;
+    // canvas.drawCircle(sx, headY, headR + 2.4*sc,
+    //   mkStrokeA(cv.isFollowed ? '#ffffff' : col,
+    //             cv.isFollowed ? 2.2*sc : 1.2*sc,
+    //             (cv.isFollowed ? 1.0 : 0.45) * baseA));
   }
-
+  
   // ── Status effects visuels ────────────────────────────────────────────────
   const se = cv.se || [];
   if (se.includes('bleed')) {

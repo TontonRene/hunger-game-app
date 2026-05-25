@@ -40,7 +40,7 @@ function generateLook(id) {
 
 // ── Mapping animState → LPC anim ─────────────────────────────────────────
 const ANIM_MAP = {
-  idle:   { lpc:'idle',  fps:2,  frames:2 },
+  idle:   { lpc:'idle',  fps:6,  frames:9 },
   walk:   { lpc:'walk',  fps:9,  frames:9 },
   run:    { lpc:'walk',  fps:13, frames:9 },
   attack: { lpc:'slash', fps:12, frames:6 },
@@ -55,6 +55,7 @@ function _mkSpriteP(alpha) {
   return p;
 }
 
+
 // ═════════════════════════════════════════════════════════════════════════
 export default function LPCSpriteCanvas({
   championId,   // pour générer le look via hash
@@ -62,7 +63,7 @@ export default function LPCSpriteCanvas({
   animState = 'idle',
   width  = 120,
   height = 140,
-  dirRow = 3,   // 0=up 1=left 2=right 3=down (LPC natif)
+  dirRow = 2,   // 0=up 1=left 2=down(face) 3=right (LPC natif)
   bgColor = '#0d0d1a',
 }) {
   // ── useImage — appelés inconditionnellement au top level ─────────────
@@ -251,7 +252,7 @@ export default function LPCSpriteCanvas({
 
   // ── Look résolu ──────────────────────────────────────────────────────
   const resolvedLook = look || generateLook(championId || 'default');
-  const { bodyType, hair, torso, legs } = resolvedLook;
+  const { bodyType, hair, torso, legs, skinTint = '#ffe0c8', hairTint = '#3d1c02' } = resolvedLook;
   const isDead = animState === 'death';
 
   // ── Rendu Picture Skia ───────────────────────────────────────────────
@@ -289,11 +290,13 @@ export default function LPCSpriteCanvas({
     const dst  = Skia.XYWHRect(dstX, dstY, sprW, sprH);
 
     const LPC_CELL = 64;
-    const srcRect  = Skia.XYWHRect(frame * LPC_CELL, dirRow * LPC_CELL, LPC_CELL, LPC_CELL);
+    // hurt.png = 1 seule rangée (64px) → row 0 forcé pour éviter lecture hors image
+    const effectiveDirRow = animName === 'hurt' ? 0 : dirRow;
+    const srcRect  = Skia.XYWHRect(frame * LPC_CELL, effectiveDirRow * LPC_CELL, LPC_CELL, LPC_CELL);
     const alpha    = isDead ? 0.38 : 1.0;
     const p        = Skia.Paint(); p.setAlphaf(alpha);
 
-    // 5 couches : body → legs → feet → torso → hair
+    // 5 couches LPC : body → legs → feet → torso → hair
     const layers = [
       `body_${bodyType}_${animName}`,
       `legs_${legs}_${animName}`,
@@ -305,6 +308,13 @@ export default function LPCSpriteCanvas({
       const img = imgs[key];
       if (img) canvas.drawImageRect(img, srcRect, dst, p);
     }
+    // ── Visage unique : cercles couleur peau + cheveux par-dessus ────────────
+    const faceY = dstY + sprH * 0.19;
+    const faceR = sprW * 0.13;
+    const hairPaint = Skia.Paint(); hairPaint.setColor(Skia.Color(hairTint)); hairPaint.setAlphaf(isDead ? 0.25 : 0.68);
+    const skinPaint = Skia.Paint(); skinPaint.setColor(Skia.Color(skinTint)); skinPaint.setAlphaf(isDead ? 0.25 : 0.72);
+    canvas.drawCircle(width/2, faceY - faceR*0.9, faceR*0.95, hairPaint);
+    canvas.drawCircle(width/2, faceY, faceR, skinPaint);
 
     // Croix pour mort
     if (isDead) {
@@ -323,7 +333,8 @@ export default function LPCSpriteCanvas({
 
     return rec.finishRecordingAsPicture();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, animName, dirRow, width, height, bgColor, bodyType, hair, torso, legs, isDead,
+  }, [frame, animName, dirRow, width, height, bgColor, bodyType, hair, torso, legs, isDead, skinTint, hairTint,
+      // note: skinTint/hairTint already included above
       // Rebuild when any image loads (tracked via frame bump)
       imgBodyMaleWalk, imgBodyMaleIdle, imgBodyMaleSlash, imgBodyMaleHurt,
       imgBodyFemaleWalk, imgBodyFemaleIdle, imgBodyFemaleSlash, imgBodyFemaleHurt]);

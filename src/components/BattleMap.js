@@ -398,12 +398,12 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
     const ty = H / 2 + (iy - camIy) * zoom;
 
     const tzCull = z * TILE_Z * zoom;
-    // Frustum culling : si la tuile à cette hauteur est hors écran, on ne la dessine pas
+
     if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) continue;
 
     const tIdx = _isoTileIdx(biome, z, gx, gy);
 
-    // Dessin de la texture PNG du tileset
+    
     if (isoTilesImg) {
       const srcCol = tIdx % 11;
       const srcRow = Math.floor(tIdx / 11);
@@ -411,7 +411,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
       const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
       canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
     } else {
-      // Fallback si l'image n'est pas encore chargée
+
       const [topC] = tileColors(biome, z);
       _tp.rewind();
       _tp.moveTo(tx, ty - th); _tp.lineTo(tx + tw, ty);
@@ -419,7 +419,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
       canvas.drawPath(_tp, mkAlpha(topC, dimA));
     }
 
-    // L'eau animée ne s'affiche que sur la couche de base (z === 0) et si la case est au niveau 0 (h === 0)
+    // Eau animée uniquement sur la couche de base
     if (z === 0 && h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
       const r0 = _tileRng(gx, gy, 0);
       for (let wi = 0; wi < 2; wi++) {

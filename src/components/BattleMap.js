@@ -354,8 +354,8 @@ function _isoTileIdx(biome, h, gx, gy) {
   return base + (rng < 0.40 ? 0 : rng < 0.72 ? 1 : 2);
 }
 
-// ── Dessin d'un cube isométrique — tiles PNG pré-rendu ───────────────────
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
+// ── Dessin d'un cube isométrique — polygones purs (pas de PNG tileset) ───
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, _unused) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
 
@@ -363,94 +363,60 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   const tx = W / 2 + (ix - camIx) * zoom;
   const ty = H / 2 + (iy - camIy) * zoom;
 
-  // Tile PNG : 32×32 src → tw*2 × tw*2 dst (carré — le tile inclut déjà les flancs)
-  const tW = tw * 2;   // = TILE_W * zoom
-  const tH = tW;       // image carrée
+  const tW = tw * 2;
+  const tH = tW;
 
   const tzCull = h * TILE_Z * zoom;
   if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) return;
 
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
+  const [topC, rightC, leftC] = tileColors(biome, h);
+  const tz = h * TILE_Z * zoom;
 
-  if (isoTilesImg) {
-    // ── Tile PNG isométrique pré-rendu ───────────────────────────────────────
-    const tIdx = _isoTileIdx(biome, h, gx, gy);
-    const srcCol = tIdx % 11;
-    const srcRow = Math.floor(tIdx / 11);
-    const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
-    const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
+  // Face du dessus (losange)
+  _tp.rewind();
+  _tp.moveTo(tx,      ty - th);
+  _tp.lineTo(tx + tw, ty);
+  _tp.lineTo(tx,      ty + th);
+  _tp.lineTo(tx - tw, ty);
+  _tp.close();
+  canvas.drawPath(_tp, mkAlpha(topC, dimA));
 
-    // ── Polygones AVANT le tile PNG ─────────────────────────────────────────
-    // 3 faces opaque : bouchent les coins transparents du PNG ET les trous
-    // entre tiles de hauteurs différentes.
-    const [topC, rightC, leftC] = tileColors(biome, h);
-    const tz = h * TILE_Z * zoom;
-    // 1) Face du dessus (losange) — remplit les coins transparents du PNG carré
-    _tp.rewind();
-    _tp.moveTo(tx,      ty - th);
-    _tp.lineTo(tx + tw, ty);
-    _tp.lineTo(tx,      ty + th);
-    _tp.lineTo(tx - tw, ty);
-    _tp.close();
-    canvas.drawPath(_tp, mkAlpha(topC, dimA));
-    // 2) Flanc droit + flanc gauche (cliff) — comblent les espaces vides en Z
-    if (h > 0 && tz > 0.5) {
-      // Face droite : (tx,ty+th) → (tx+tw,ty) → (tx+tw,ty+tz) → (tx,ty+th+tz)
-      _rp.rewind();
-      _rp.moveTo(tx,      ty + th);
-      _rp.lineTo(tx + tw, ty);
-      _rp.lineTo(tx + tw, ty + tz);
-      _rp.lineTo(tx,      ty + th + tz);
-      _rp.close();
-      canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
-      // Face gauche : (tx-tw,ty) → (tx,ty+th) → (tx,ty+th+tz) → (tx-tw,ty+tz)
-      _lp.rewind();
-      _lp.moveTo(tx - tw, ty);
-      _lp.lineTo(tx,      ty + th);
-      _lp.lineTo(tx,      ty + th + tz);
-      _lp.lineTo(tx - tw, ty + tz);
-      _lp.close();
-      canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
-    }
+  // Flancs (cliff) — comblent les trous entre hauteurs différentes
+  if (h > 0 && tz > 0.5) {
+    _rp.rewind();
+    _rp.moveTo(tx,      ty + th);
+    _rp.lineTo(tx + tw, ty);
+    _rp.lineTo(tx + tw, ty + tz);
+    _rp.lineTo(tx,      ty + th + tz);
+    _rp.close();
+    canvas.drawPath(_rp, mkAlpha(rightC, 0.96 * dimA));
 
-    // Tile PNG par-dessus les polygones (dessus texturé + flanc de base)
-    canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
+    _lp.rewind();
+    _lp.moveTo(tx - tw, ty);
+    _lp.lineTo(tx,      ty + th);
+    _lp.lineTo(tx,      ty + th + tz);
+    _lp.lineTo(tx - tw, ty + tz);
+    _lp.close();
+    canvas.drawPath(_lp, mkAlpha(leftC, 0.96 * dimA));
+  }
 
-    // Eau animée par-dessus le tile h=0
-    if (h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
-      const r0 = _tileRng(gx, gy, 0);
-      for (let wi = 0; wi < 2; wi++) {
-        const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
-        const ringA  = (1 - phase) * 0.16 * dimA;
-        if (ringA < 0.010) continue;
-        const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
-        _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx-rw, ty-rh, rw*2, rh*2));
-        canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom*0.28), ringA));
-      }
-    }
-  } else {
-    // ── Fallback polygone (avant chargement PNG) ─────────────────────────────
-    const [topC, rightC, leftC] = tileColors(biome, h);
-    const tz = h * TILE_Z * zoom;
-    _tp.rewind();
-    _tp.moveTo(tx, ty-th); _tp.lineTo(tx+tw, ty);
-    _tp.lineTo(tx, ty+th); _tp.lineTo(tx-tw, ty); _tp.close();
-    canvas.drawPath(_tp, mkAlpha(topC, dimA));
-    if (h > 0 && tz > 0.5) {
-      _rp.rewind();
-      _rp.moveTo(tx,ty+th); _rp.lineTo(tx+tw,ty);
-      _rp.lineTo(tx+tw,ty+tz); _rp.lineTo(tx,ty+th+tz); _rp.close();
-      canvas.drawPath(_rp, mkAlpha(rightC, 0.96*dimA));
-      _lp.rewind();
-      _lp.moveTo(tx-tw,ty); _lp.lineTo(tx,ty+th);
-      _lp.lineTo(tx,ty+th+tz); _lp.lineTo(tx-tw,ty+tz); _lp.close();
-      canvas.drawPath(_lp, mkAlpha(leftC, 0.96*dimA));
+  // Eau animée h=0
+  if (h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
+    const r0 = _tileRng(gx, gy, 0);
+    for (let wi = 0; wi < 2; wi++) {
+      const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
+      const ringA = (1 - phase) * 0.18 * dimA;
+      if (ringA < 0.010) continue;
+      const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
+      _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
+      canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom * 0.28), ringA));
     }
   }
 
-  // Brume de guerre overlay (rect couvrant toute l'image du tile)
+  // Brume de guerre
   if (fogA > 0.05) {
-    canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th, tW, tH), mkAlpha('#000814', fogA * 0.70));
+    canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
   }
 }
 

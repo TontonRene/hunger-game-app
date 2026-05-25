@@ -383,28 +383,56 @@ const _CLIFF_L = [
   '#4862b8', // row10
 ];
 
-// ── Dessin d'un cube isométrique — flancs polygones + PNG tileset par-dessus ─
+// ── Dessin d'un cube isométrique avec boucle d'empilement (Tile Stacking) ──
 function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
-
-  const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, h);
-  const tx = W / 2 + (ix - camIx) * zoom;
-  const ty = H / 2 + (iy - camIy) * zoom;
-
   const tW = tw * 2;
   const tH = tW;
-
-  const tzCull = h * TILE_Z * zoom;
-  if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) return;
-
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
-  const tz   = h * TILE_Z * zoom;
 
-  const tIdx  = _isoTileIdx(biome, h, gx, gy);
-  const tRow  = Math.floor(tIdx / 11);
-  const cliffR = _CLIFF_R[Math.min(tRow, _CLIFF_R.length - 1)];
-  const cliffL = _CLIFF_L[Math.min(tRow, _CLIFF_L.length - 1)];
+  // Boucle d'empilement vertical du sol (0) jusqu'à la hauteur de la case (h)
+  for (let z = 0; z <= h; z++) {
+    const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, z);
+    const tx = W / 2 + (ix - camIx) * zoom;
+    const ty = H / 2 + (iy - camIy) * zoom;
+
+    const tzCull = z * TILE_Z * zoom;
+    // Frustum culling : si la tuile à cette hauteur est hors écran, on ne la dessine pas
+    if (tx < -tW || tx > W + tW || ty < -(tH + tzCull) || ty > H + tH) continue;
+
+    const tIdx = _isoTileIdx(biome, z, gx, gy);
+
+    // Dessin de la texture PNG du tileset
+    if (isoTilesImg) {
+      const srcCol = tIdx % 11;
+      const srcRow = Math.floor(tIdx / 11);
+      const src = Skia.XYWHRect(srcCol * 32, srcRow * 32, 32, 32);
+      const dst = Skia.XYWHRect(tx - tw, ty - th, tW, tH);
+      canvas.drawImageRect(isoTilesImg, src, dst, _getSpriteP(dimA));
+    } else {
+      // Fallback si l'image n'est pas encore chargée
+      const [topC] = tileColors(biome, z);
+      _tp.rewind();
+      _tp.moveTo(tx, ty - th); _tp.lineTo(tx + tw, ty);
+      _tp.lineTo(tx, ty + th); _tp.lineTo(tx - tw, ty); _tp.close();
+      canvas.drawPath(_tp, mkAlpha(topC, dimA));
+    }
+
+    // L'eau animée ne s'affiche que sur la couche de base (z === 0) et si la case est au niveau 0 (h === 0)
+    if (z === 0 && h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
+      const r0 = _tileRng(gx, gy, 0);
+      for (let wi = 0; wi < 2; wi++) {
+        const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
+        const ringA = (1 - phase) * 0.18 * dimA;
+        if (ringA < 0.010) continue;
+        const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
+        _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
+        canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom * 0.28), ringA));
+      }
+    }
+  }
+}
 
 // ── 1) Flancs polygones (AVANT le PNG) — bouchent les trous de hauteur ───
   /*
@@ -460,7 +488,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   // if (fogA > 0.05) {
   //   canvas.drawRect(Skia.XYWHRect(tx - tw, ty - th - tzCull, tW, tH + tzCull), mkAlpha('#000814', fogA * 0.70));
   // }
-}
+
 
 // ── Look déterministe par champion ───────────────────────────────────────
 function _hashId(id) {
@@ -673,23 +701,12 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
       const img = spriteImgs?.[key];
       if (img) canvas.drawImageRect(img, srcRect, dst, paint);
     }
-    // ── Visage dessiné PAR-DESSUS les sprites LPC (garantit la visibilité) ──
+    // ── Zone tête (conservé uniquement pour positionner la barre HP au bon endroit) ──
     const faceR  = spW * 0.18;            // rayon du visage
-    const faceX  = sx;
     const faceY  = spYfinal + spH * 0.14; // haut du sprite = zone tête
     headY = faceY; headR = faceR;         // pour la HP bar
     topY  = faceY - faceR;
-    // Contour sombre
-    canvas.drawCircle(faceX, faceY, faceR + 1.2*sc, mkAlpha('#2a1a0a', 0.75 * baseA));
-    // Peau
-    canvas.drawCircle(faceX, faceY, faceR, mkAlpha(skinTint, baseA));
-    // Yeux
-    const eyeR = Math.max(0.8, faceR * 0.20);
-    const eyeOff = faceR * 0.32;
-    canvas.drawCircle(faceX - eyeOff, faceY - faceR * 0.10, eyeR, mkAlpha('#1a0a00', 0.90 * baseA));
-    canvas.drawCircle(faceX + eyeOff, faceY - faceR * 0.10, eyeR, mkAlpha('#1a0a00', 0.90 * baseA));
-    // Cheveux (bande colorée sur le dessus de la tête)
-    canvas.drawCircle(faceX, faceY - faceR * 0.55, faceR * 0.72, mkAlpha(hairTint, 0.85 * baseA));
+
     // Ring indicateur sous les pieds
     canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
       mkStrokeA(cv.isFollowed ? '#ffffff' : col,
@@ -732,7 +749,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     //             cv.isFollowed ? 2.2*sc : 1.2*sc,
     //             (cv.isFollowed ? 1.0 : 0.45) * baseA));
   }
-  
+
   // ── Status effects visuels ────────────────────────────────────────────────
   const se = cv.se || [];
   if (se.includes('bleed')) {

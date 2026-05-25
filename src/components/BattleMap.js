@@ -553,8 +553,8 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const dst2  = Skia.XYWHRect(sx - spW2 / 2, sy - spH2, spW2, spH2);
     const bodyImg2 = spriteImgs?.[`lpc_body_${bodyType}_hurt`];
     if (bodyImg2) {
-      // Frame 0, direction down (LPC row 3)
-      const src2 = Skia.XYWHRect(0, 3 * 64, 64, 64);
+      // hurt.png = 1 seule rangée (64px de haut) → toujours row 0
+      const src2 = Skia.XYWHRect(0, 0, 64, 64);
       const p2   = _getSpriteP(0.28);
       const dead_layers = [
         `lpc_body_${bodyType}_hurt`,
@@ -595,14 +595,14 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   const isAttacking = cv.combatFlash > 0.4;
 
   // Animation : slash (attaque), walk (marche), idle (repos)
-  // LPC frame counts : walk=9, idle=2, slash=6
+  // LPC frame counts : walk=9, idle=9, slash=6
   let animName, animFps, animFrames;
   if (isAttacking) {
     animName = 'slash'; animFps = 12; animFrames = 6;
   } else if (isMoving) {
     animName = 'walk';  animFps = 9;  animFrames = 9;
   } else {
-    animName = 'idle';  animFps = 2;  animFrames = 2;
+    animName = 'idle';  animFps = 6;  animFrames = 9;
   }
   const frameIdx = Math.floor(t * animFps) % animFrames;
 

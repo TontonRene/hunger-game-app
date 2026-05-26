@@ -608,9 +608,9 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
 
   // Direction LPC : row0=haut, row1=gauche, row2=droite, row3=bas
   // cv.dirRow     : 0=bas, 1=gauche, 2=droite, 3=haut
-  // row0=front(face), row1=left, row2=back, row3=right dans ces sprites
-  const _LPC_DIR_MAP = [0, 1, 3, 2];
-  const lpcDirRow = _LPC_DIR_MAP[cv.dirRow ?? 0] ?? 0;
+  // row0=back, row1=left, row2=front(face), row3=right dans ces sprites
+  const _LPC_DIR_MAP = [2, 1, 3, 0];
+  const lpcDirRow = _LPC_DIR_MAP[cv.dirRow ?? 0] ?? 2;
 
   const spH = Math.max(18, zoom * (TILE_H / 2) * 2.6);
   const spW = spH;

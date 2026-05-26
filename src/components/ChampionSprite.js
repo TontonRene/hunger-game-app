@@ -57,7 +57,7 @@ export default function ChampionSprite({
         championId={name || archetype || 'default'}
         look={look}
         animState={anim}
-        dirRow={0}        /* row 0 = front/face dans ces sprites */
+        dirRow={2}        /* LPC standard : row 2 = front/face */
         width={sprWidth}
         height={height}
         bgColor="#0d0d1a"

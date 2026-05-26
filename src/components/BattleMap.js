@@ -579,24 +579,12 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
         if (img2) canvas.drawImageRect(img2, src2, dst2, p2);
       }
     } else {
-      const charSheet = spriteImgs?.charSheet;
-      if (charSheet) {
-        const fW = charSheet.width() / 8;
-        const fH = charSheet.height() / 12;
-        const gs = (pair) => Skia.XYWHRect(0, pair * 2 * fH, fW, fH);
-        canvas.drawImageRect(charSheet, gs(0), dst2, _getTintPaint(look.skinTint  || '#c09070', 0.28));
-        canvas.drawImageRect(charSheet, gs(5), dst2, _getTintPaint(look.pantsTint || '#555555', 0.28));
-        canvas.drawImageRect(charSheet, gs(2), dst2, _getTintPaint(look.shirtTint || '#888888', 0.28));
-        canvas.drawImageRect(charSheet, gs(3), dst2, _getSpriteP(0.22));
-        canvas.drawImageRect(charSheet, gs(4), dst2, _getSpriteP(0.22));
-        canvas.drawImageRect(charSheet, gs(1), dst2, _getTintPaint(look.hairTint  || '#3d1c02', 0.28));
-      } else {
-        const ds = Math.max(0.5, zoom * 0.45);
-        const xp = Skia.Path.Make();
-        xp.moveTo(sx-5*ds, sy-2*ds); xp.lineTo(sx+5*ds, sy+4*ds);
-        xp.moveTo(sx+5*ds, sy-2*ds); xp.lineTo(sx-5*ds, sy+4*ds);
-        canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
-      }
+      // Fallback dead figure : croix simple si sprite LPC pas chargé
+      const ds = Math.max(0.5, zoom * 0.45);
+      const xp = Skia.Path.Make();
+      xp.moveTo(sx-5*ds, sy-2*ds); xp.lineTo(sx+5*ds, sy+4*ds);
+      xp.moveTo(sx+5*ds, sy-2*ds); xp.lineTo(sx-5*ds, sy+4*ds);
+      canvas.drawPath(xp, mkStrokeA('#444444', 1.5*ds, 0.55));
     }
     return;
   }
@@ -676,34 +664,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
                 cv.isFollowed ? 2.2*sc : 1.3*sc,
                 (cv.isFollowed ? 0.95 : 0.55) * baseA));
 
-  } else if (spriteImgs?.charSheet) {
-    // ── Fallback charSheet (ancien système global.png) ───────────────────────
-    const charSheet = spriteImgs.charSheet;
-    const fps2      = isAttacking ? 14 : isMoving ? 8 : 0;
-    const FCOLS     = 8;
-    const frameIdx2 = fps2 > 0 ? Math.floor(t * fps2) % FCOLS : 0;
-    const dirOff    = (cv.dirRow === 1) ? 1 : 0;
-    const {
-      skinTint  = '#ffe0c8', hairTint  = '#3d1c02',
-      shirtTint = '#e74c3c', pantsTint = '#2c3e50',
-    } = look;
-    const fW = charSheet.width()  / FCOLS;
-    const fH = charSheet.height() / 12;
-    const dst2   = Skia.XYWHRect(spX, spYfinal, spW, spH);
-    const getSrc2 = (pair) =>
-      Skia.XYWHRect(frameIdx2 * fW, (pair * 2 + dirOff) * fH, fW, fH);
-    canvas.drawImageRect(charSheet, getSrc2(0), dst2, _getTintPaint(skinTint,  baseA));
-    canvas.drawImageRect(charSheet, getSrc2(5), dst2, _getTintPaint(pantsTint, baseA));
-    canvas.drawImageRect(charSheet, getSrc2(2), dst2, _getTintPaint(shirtTint, baseA));
-    canvas.drawImageRect(charSheet, getSrc2(3), dst2, _getSpriteP(baseA));
-    canvas.drawImageRect(charSheet, getSrc2(4), dst2, _getSpriteP(baseA));
-    canvas.drawImageRect(charSheet, getSrc2(1), dst2, _getTintPaint(hairTint,  baseA));
-    canvas.drawCircle(sx, sy - 0.5*sc, spW * 0.48,
-      mkStrokeA(cv.isFollowed ? '#ffffff' : col,
-                cv.isFollowed ? 2.2*sc : 1.1*sc,
-                (cv.isFollowed ? 0.95 : 0.38) * baseA));
-
-} else {
+  } else {
     // ── Fallback géométrique ─────────────────────────────────────────────────
     // const geo = _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col);
     // headR = geo.headR; headY = geo.headY; topY = geo.topY;
@@ -1464,8 +1425,6 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
 
   // ── Tileset isométrique universel (352×352, grille 11×11 de tiles 32×32) ───
   const imgIsoTiles  = useImage(require('../../assets/sprites/tiles/iso_tiles.png'));
-  // ── Sprite personnages (global.png 256×384, 8 cols × 12 rows × 32×32) ─────
-  const imgCharSheet = useImage(require('../../assets/sprites/characters/global.png'));
   // ── Animaux (faune) ────────────────────────────────────────────────────────
   const imgDeerIdle  = useImage(require('../../assets/sprites/animals/deer_idle.png'));
   const imgDeerRun   = useImage(require('../../assets/sprites/animals/deer_run.png'));
@@ -1561,7 +1520,6 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
   // Mise à jour si useImage charge
   useEffect(() => {
     const cur = spriteImgsRef.current;
-    if (imgCharSheet) cur.charSheet      = imgCharSheet;
     // Animaux
     if (imgDeerIdle)  cur.animalDeerIdle = imgDeerIdle;
     if (imgDeerRun)   cur.animalDeerRun  = imgDeerRun;
@@ -1575,8 +1533,7 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     if (imgWolfBite)  cur.animalWolfBite = imgWolfBite;
     // Tileset
     if (imgIsoTiles)  cur.isoTiles       = imgIsoTiles;
-  }, [imgCharSheet,
-      imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
+  }, [imgDeerIdle, imgDeerRun, imgBoarIdle, imgBoarRun, imgBoarAtk,
       imgHareIdle, imgHareRun, imgWolfIdle, imgWolfRun, imgWolfBite,
       imgIsoTiles]);
 

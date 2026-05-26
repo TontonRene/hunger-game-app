@@ -1,9 +1,11 @@
-﻿/**
+/**
  * ChampionSprite — Affichage sprite animé d'un champion
  * Utilise LPCSpriteCanvas (Skia) — sprites LPC natifs, 5 couches composées.
+ * Drag horizontal sur le sprite → fait tourner le perso (4 directions LPC).
  */
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import LPCSpriteCanvas from './LPCSpriteCanvas';
 
 // ── Couleurs par archétype ────────────────────────────────────────────────
@@ -29,6 +31,12 @@ const STAT_COLOR = {
   endurance:'#2ecc71', instinct:'#9b59b6', survival:'#1abc9c',
 };
 
+// Cycle de rotation LPC : front → right → back → left → front
+// LPC standard : 0=back, 1=left, 2=front, 3=right
+// Cycle visuel "tourner vers la droite" : 2 → 3 → 0 → 1 → 2
+const ROT_CYCLE = [2, 3, 0, 1];
+const PX_PER_TURN = 40;  // pixels de drag pour changer de direction
+
 // ═══════════════════════════════════════════════════════════════════════════
 export default function ChampionSprite({
   name,
@@ -42,26 +50,44 @@ export default function ChampionSprite({
   style,
 }) {
   const col       = ARCH_COLORS[archetype] || '#e2b96f';
-  // Mapping stat d'entraînement → animation adaptée
   const anim      = isDead ? 'death'
     : trainStat   ? (STAT_ANIM[trainStat] || 'idle')
     : animState   || 'idle';
   const accentCol = trainStat ? (STAT_COLOR[trainStat] || col) : col;
-  // Direction : face au joueur (row 2 = droite, LPC natif)
   const sprWidth  = Math.round(height * 0.75);
+
+  // Index dans ROT_CYCLE (commence à 0 = front/face)
+  const [rotIdx, setRotIdx] = useState(0);
+  const rotIdxRef = useRef(0);
+
+  // Drag horizontal : chaque PX_PER_TURN pixels → next direction
+  const panGesture = Gesture.Pan()
+    .onUpdate(e => {
+      const turns = Math.round(e.translationX / PX_PER_TURN);
+      const next = ((rotIdxRef.current + turns) % 4 + 4) % 4;
+      setRotIdx(next);
+    })
+    .onEnd(() => {
+      rotIdxRef.current = rotIdx;
+    });
+
+  const dirRow = ROT_CYCLE[rotIdx];
 
   return (
     <View style={[styles.container, { height }, style]}>
-      {/* ── Sprite LPC Skia ───────────────────────────────────────────── */}
-      <LPCSpriteCanvas
-        championId={name || archetype || 'default'}
-        look={look}
-        animState={anim}
-        dirRow={2}        /* LPC standard : row 2 = front/face */
-        width={sprWidth}
-        height={height}
-        bgColor="#0d0d1a"
-      />
+      <GestureDetector gesture={panGesture}>
+        <View>
+          <LPCSpriteCanvas
+            championId={name || archetype || 'default'}
+            look={look}
+            animState={anim}
+            dirRow={dirRow}
+            width={sprWidth}
+            height={height}
+            bgColor="#0d0d1a"
+          />
+        </View>
+      </GestureDetector>
       {showTag && (
         <View style={styles.tag}>
           {name ? <Text style={styles.name}>{name}</Text> : null}

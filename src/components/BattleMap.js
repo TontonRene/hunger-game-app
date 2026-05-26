@@ -535,10 +535,21 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     canvas.drawCircle(sx, sy - 8*sc, 16*sc, mkAlpha('#ff6644', cv.combatFlash * 0.30));
   }
 
-  // Ombre portée
+  // Ombre portée — plus opaque pour ancrer au sol
   const shadowP = Skia.Path.Make();
   shadowP.addOval(Skia.XYWHRect(sx - 7*sc, sy - 1.2*sc, 14*sc, 4.5*sc));
-  canvas.drawPath(shadowP, mkAlpha('#000000', 0.28 * baseA));
+  canvas.drawPath(shadowP, mkAlpha('#000000', 0.48 * baseA));
+
+  // ── Marqueur de contact au sol (losange iso fin coloré) ────────────────
+  // Aide visuelle pour bien situer le perso sur la tile
+  const cgw = 8 * sc, cgh = 4 * sc;
+  const cgp = Skia.Path.Make();
+  cgp.moveTo(sx,      sy - cgh);
+  cgp.lineTo(sx+cgw,  sy);
+  cgp.lineTo(sx,      sy + cgh);
+  cgp.lineTo(sx-cgw,  sy);
+  cgp.close();
+  canvas.drawPath(cgp, mkStrokeA(col, 1.1 * sc, 0.55 * baseA));
 
   const look     = cv.look || generateLook(cv.id);
   const bodyType = look.bodyType || 'male';
@@ -1166,10 +1177,20 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const spHF = Math.max(10, zoom * (TILE_H / 2) * (spec?.scale || 2.0));
     const spWF = spHF;
 
-    // Ombre portée sous l'animal (ellipse aplatie)
+    // Ombre portée sous l'animal (ellipse aplatie) + marqueur contact
     const shW = spHF * 0.65, shH = spHF * 0.18;
     _ep.rewind(); _ep.addOval(Skia.XYWHRect(fsx - shW/2, fsy - shH*0.5, shW, shH));
-    canvas.drawPath(_ep, mkAlpha('#000000', 0.30));
+    canvas.drawPath(_ep, mkAlpha('#000000', 0.50));
+    // Losange iso fin pour ancrage visuel au sol
+    const fcg = FAUNA_COLORS[f.type] || '#aaa';
+    const cgwF = spHF * 0.28, cghF = spHF * 0.14;
+    _tp.rewind();
+    _tp.moveTo(fsx,       fsy - cghF);
+    _tp.lineTo(fsx+cgwF,  fsy);
+    _tp.lineTo(fsx,       fsy + cghF);
+    _tp.lineTo(fsx-cgwF,  fsy);
+    _tp.close();
+    canvas.drawPath(_tp, mkStrokeA(fcg, 1.0, 0.45));
 
     // Sélection animation selon état
     const fps = isAtk ? (spec?.atkFps || 12)

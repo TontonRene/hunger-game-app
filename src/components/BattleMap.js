@@ -629,21 +629,29 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const LPC_CELL = 64;
     const srcRect  = Skia.XYWHRect(frameIdx * LPC_CELL, lpcDirRow * LPC_CELL, LPC_CELL, LPC_CELL);
     const dst      = Skia.XYWHRect(spX, spYfinal, spW, spH);
+    // Offsets relatifs à la taille du sprite, pour aligner cheveux/torso
+    // avec le nouveau body modifié (têtes ajoutées). Ajustables.
+    const HAIR_DX  =  spW * 0.030;   // +X = vers la droite
+    const HAIR_DY  = -spH * 0.060;   // -Y = vers le haut
+    const TORSO_DX =  spW * 0.020;
+    const TORSO_DY = -spH * 0.030;
+    const dstHair  = Skia.XYWHRect(spX + HAIR_DX,  spYfinal + HAIR_DY,  spW, spH);
+    const dstTorso = Skia.XYWHRect(spX + TORSO_DX, spYfinal + TORSO_DY, spW, spH);
     const {
       skinTint  = '#e8c49a', hairTint  = '#3d1c02',
       shirtTint = '#e74c3c', pantsTint = '#2c3e50',
     } = look;
-    // Couches avec teintes individuelles
+    // Couches : [key, paint, dstOverride?]
     const lpc_layer_paints = [
-      [  `lpc_body_${bodyType}_${animName}`, _getTintPaint(skinTint,  baseA) ],
-      [  `lpc_legs_${legsKey}_${animName}`,  _getTintPaint(pantsTint, baseA) ],
-      [  `lpc_feet_boots_${animName}`,       _getSpriteP(baseA)              ],
-      [  `lpc_torso_${torsoKey}_${animName}`,_getTintPaint(shirtTint, baseA) ],
-      [  `lpc_hair_${hairKey}_${animName}`,  _getTintPaint(hairTint,  baseA) ],
+      [  `lpc_body_${bodyType}_${animName}`, _getTintPaint(skinTint,  baseA), dst      ],
+      [  `lpc_legs_${legsKey}_${animName}`,  _getTintPaint(pantsTint, baseA), dst      ],
+      [  `lpc_feet_boots_${animName}`,       _getSpriteP(baseA),              dst      ],
+      [  `lpc_torso_${torsoKey}_${animName}`,_getTintPaint(shirtTint, baseA), dstTorso ],
+      [  `lpc_hair_${hairKey}_${animName}`,  _getTintPaint(hairTint,  baseA), dstHair  ],
     ];
-    for (const [key, paint] of lpc_layer_paints) {
+    for (const [key, paint, layerDst] of lpc_layer_paints) {
       const img = spriteImgs?.[key];
-      if (img) canvas.drawImageRect(img, srcRect, dst, paint);
+      if (img) canvas.drawImageRect(img, srcRect, layerDst, paint);
     }
     // ── Zone tête (conservé uniquement pour positionner la barre HP au bon endroit) ──
     const faceR  = spW * 0.18;            // rayon du visage

@@ -293,17 +293,25 @@ export default function LPCSpriteCanvas({
     const alpha    = isDead ? 0.38 : 1.0;
     const p        = Skia.Paint(); p.setAlphaf(alpha);
 
+    // Offsets pour cheveux/torso (alignement avec body modifié à têtes ajoutées)
+    const HAIR_DX  =  sprW * 0.030;
+    const HAIR_DY  = -sprH * 0.060;
+    const TORSO_DX =  sprW * 0.020;
+    const TORSO_DY = -sprH * 0.030;
+    const dstHair  = Skia.XYWHRect(dstX + HAIR_DX,  dstY + HAIR_DY,  sprW, sprH);
+    const dstTorso = Skia.XYWHRect(dstX + TORSO_DX, dstY + TORSO_DY, sprW, sprH);
+
     // 5 couches : body → legs → feet → torso → hair
     const layers = [
-      `body_${bodyType}_${animName}`,
-      `legs_${legs}_${animName}`,
-      `feet_boots_${animName}`,
-      `torso_${torso}_${animName}`,
-      `hair_${hair}_${animName}`,
+      [`body_${bodyType}_${animName}`, dst      ],
+      [`legs_${legs}_${animName}`,      dst      ],
+      [`feet_boots_${animName}`,        dst      ],
+      [`torso_${torso}_${animName}`,    dstTorso ],
+      [`hair_${hair}_${animName}`,      dstHair  ],
     ];
-    for (const key of layers) {
+    for (const [key, layerDst] of layers) {
       const img = imgs[key];
-      if (img) canvas.drawImageRect(img, srcRect, dst, p);
+      if (img) canvas.drawImageRect(img, srcRect, layerDst, p);
     }
 
     // Croix pour mort

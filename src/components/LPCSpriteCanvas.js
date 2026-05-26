@@ -62,7 +62,7 @@ export default function LPCSpriteCanvas({
   animState = 'idle',
   width  = 120,
   height = 140,
-  dirRow = 3,   // 0=up 1=left 2=right 3=down (LPC natif)
+  dirRow = 0,   // 0=front 1=left 2=right 3=back (selon sprites)
   bgColor = '#0d0d1a',
 }) {
   // ── useImage — appelés inconditionnellement au top level ─────────────

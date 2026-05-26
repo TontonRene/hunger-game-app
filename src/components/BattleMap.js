@@ -18,8 +18,8 @@ const _CLIP_INTERSECT = 1;
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
 const TILE_H   = 12;   // hauteur du losange
 const TILE_Z   = 8;    // pixels par unité d'élévation
-const HM_CELLS = 20;   // grille heightmap 20×20
-const HM_CELL  = 5;    // unités monde par cellule (100/20 = 5)
+const HM_CELLS = 60;   // grille heightmap 60×60 (×3 pour grande map)
+const HM_CELL  = 5;    // unités monde par cellule (300/60 = 5 — internal 0-300)
 
 // ── Palettes champion / supply ────────────────────────────────────────────
 const CHAMP_COLORS = [
@@ -248,9 +248,9 @@ function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
 }
 
 // Centre iso de la map (pour camera par défaut)
-// wToIso(50,50,1) → iy=112, on cible iy=120 (centre exact de la map 0-240)
+// Map interne 0-300 (HM_CELLS=60 × HM_CELL=5) → centre à 150
 function mapCenterIso() {
-  const { ix, iy } = wToIso(50, 50, 1);
+  const { ix, iy } = wToIso(150, 150, 1);
   return { ix, iy: iy + 8 };
 }
 
@@ -1831,11 +1831,12 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     const hm    = battleState.map?.heightMap
       || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
-    // Normalisation → espace monde 0-100 (backend = 100×100, simulateur = 1800×1800)
+    // Normalisation → espace monde interne 0-300 (HM_CELLS=60 × HM_CELL=5)
+    // backend = 100×100, simulateur = 5400×5400 → tout vient à 0-300 internes
     const mapW = battleState.map?.width  || 100;
     const mapH = battleState.map?.height || 100;
-    const sX   = 100 / mapW;
-    const sY   = 100 / mapH;
+    const sX   = 300 / mapW;
+    const sY   = 300 / mapH;
 
     // Pre-compute sorted tiles (une seule fois par heightmap)
     const prevHm = gvisRef.current.heightMap;

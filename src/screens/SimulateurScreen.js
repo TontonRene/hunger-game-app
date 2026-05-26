@@ -20,8 +20,8 @@ const haptic = {
 };
 
 // ── Constantes monde ──────────────────────────────────────────────────────
-const WORLD        = 1800;         // ×6 — grande île ouverte
-const ISLAND_EDGE  = 168;          // bords = eau
+const WORLD        = 5400;         // ×18 — île massive (3× le précédent)
+const ISLAND_EDGE  = 504;          // bords = eau (×3)
 const WATER_DMG    = 3;
 const COMBAT_RANGE = 54;           // référence (combat utilise portées arme)
 const DAY_LEN      = 80;           // vrai cycle jour/nuit
@@ -105,19 +105,19 @@ const FLORA_DEFS = {
   poisonPlant: { food:0,   water:0,  heal:0,  poisonChance:1.0,  label:'Plante toxique' },
 };
 
-// ── POIs — coordonnées ×3 + nouveaux POIs pour grande map ────────────────
+// ── POIs — coordonnées ×3 (map ×3) ──────────────────────────────────────
 const BASE_POIS = [
-  { id:'caves',      name:'Grottes',        icon:'🌑', x:330,  y:360,  radius:132, effect:'shelter' },
-  { id:'ruins',      name:'Ruines',         icon:'🏚', x:1410, y:510,  radius:108, effect:'craft'   },
-  { id:'river',      name:'Rivière',        icon:'🌊', x:630,  y:1140, radius:96,  effect:'water'   },
-  { id:'watchtower', name:'Tour de guet',   icon:'🗼', x:1530, y:1290, radius:72,  effect:'vision'  },
-  { id:'forest',     name:'Forêt Dense',    icon:'🌲', x:390,  y:1410, radius:168, effect:'cover'   },
-  { id:'village',    name:'Village',        icon:'🏘', x:1110, y:1620, radius:120, effect:'loot'    },
-  { id:'marsh',      name:'Marécage',       icon:'💧', x:240,  y:900,  radius:140, effect:'water'   },
-  { id:'highland',   name:'Hauteurs',       icon:'⛰', x:1500, y:360,  radius:90,  effect:'vision'  },
-  { id:'oldcamp',    name:'Vieux Camp',     icon:'🏕', x:900,  y:1500, radius:110, effect:'shelter' },
-  { id:'hotspring',  name:'Source Chaude',  icon:'♨️', x:1360, y:1000, radius:80,  effect:'water'   },
-  { id:'deadforest', name:'Bois Mort',      icon:'🌵', x:500,  y:700,  radius:150, effect:'cover'   },
+  { id:'caves',      name:'Grottes',        icon:'🌑', x:990,  y:1080, radius:396, effect:'shelter' },
+  { id:'ruins',      name:'Ruines',         icon:'🏚', x:4230, y:1530, radius:324, effect:'craft'   },
+  { id:'river',      name:'Rivière',        icon:'🌊', x:1890, y:3420, radius:288, effect:'water'   },
+  { id:'watchtower', name:'Tour de guet',   icon:'🗼', x:4590, y:3870, radius:216, effect:'vision'  },
+  { id:'forest',     name:'Forêt Dense',    icon:'🌲', x:1170, y:4230, radius:504, effect:'cover'   },
+  { id:'village',    name:'Village',        icon:'🏘', x:3330, y:4860, radius:360, effect:'loot'    },
+  { id:'marsh',      name:'Marécage',       icon:'💧', x:720,  y:2700, radius:420, effect:'water'   },
+  { id:'highland',   name:'Hauteurs',       icon:'⛰', x:4500, y:1080, radius:270, effect:'vision'  },
+  { id:'oldcamp',    name:'Vieux Camp',     icon:'🏕', x:2700, y:4500, radius:330, effect:'shelter' },
+  { id:'hotspring',  name:'Source Chaude',  icon:'♨️', x:4080, y:3000, radius:240, effect:'water'   },
+  { id:'deadforest', name:'Bois Mort',      icon:'🌵', x:1500, y:2100, radius:450, effect:'cover'   },
 ];
 
 // ── Ressources collectables ────────────────────────────────────────────────
@@ -720,9 +720,9 @@ function makeChamp(id, name, colorIdx, spawnRange=[200,700], forcedTraits=null) 
 
 // ── État initial ──────────────────────────────────────────────────────────
 const MAP_SIZES = {
-  S:{ spawn:[200, 700] },
-  M:{ spawn:[150, 750] },
-  L:{ spawn:[100, 800] },
+  S:{ spawn:[600,  2100] },   // ×3
+  M:{ spawn:[450,  2250] },
+  L:{ spawn:[300,  2400] },
 };
 
 // ── Génération faune — procédurale terrain-aware ──────────────────────────
@@ -868,9 +868,22 @@ function createSimState(cfg={}) {
   const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne','volcan','jungle'][rng(0,6)];
   const mapSeed    = Date.now() % 999983;
 
-  const champs    = names.map((n,i)=>makeChamp(`sim_${i}`,n,i,
-    sizeCfg.spawn,
-    cfg.champBuilds?.[i]?.traits || null));
+  // Spawn équidistant sur le périmètre du carré [sMin, sMax]
+  const [sMin, sMax] = sizeCfg.spawn;
+  const side = sMax - sMin;
+  const perim = side * 4;
+  const champs = names.map((n,i)=>{
+    // progression 0..1 sur le périmètre, légèrement décalée pour éviter coin (i+0.5)
+    const t = ((i + 0.5) / count) * perim;
+    let sx, sy;
+    if (t < side)            { sx = sMin + t;             sy = sMin; }              // haut
+    else if (t < 2*side)     { sx = sMax;                 sy = sMin + (t - side); } // droite
+    else if (t < 3*side)     { sx = sMax - (t - 2*side);  sy = sMax; }              // bas
+    else                     { sx = sMin;                 sy = sMax - (t - 3*side); } // gauche
+    const c = makeChamp(`sim_${i}`, n, i, sizeCfg.spawn, cfg.champBuilds?.[i]?.traits || null);
+    c.x = sx; c.y = sy;
+    return c;
+  });
 
   return {
     id:'sim_local', tick:0, status:'active', winner:null,
@@ -3012,21 +3025,6 @@ export default function SimulateurScreen() {
     return s;
   }),[]);
 
-  const sponsorHeal = useCallback((champId)=>setSim(p=>{
-    const s=fastClone(p);
-    const cost = 5;
-    if ((s.sponsorPts||0) < cost) return p;
-    const c = s.champions.find(x=>x.id===champId&&x.hp>0);
-    if (!c) return p;
-    s.sponsorPts -= cost;
-    const heal = 120;
-    c.hp = Math.min(c.maxHp, c.hp+heal);
-    c.hunger = Math.min(100, (c.hunger||100)+30);
-    c.thirst = Math.min(100, (c.thirst||100)+30);
-    s.events.push({type:'event',evType:'sponsor',tick:s.tick,text:`💉 Colis médical sponsor pour ${c.name} ! (+${heal} PV)`});
-    return s;
-  }),[]);
-
   const setInstruction = useCallback((champId, instr) => {
     setSim(p => {
       const s = fastClone(p);
@@ -3053,12 +3051,6 @@ export default function SimulateurScreen() {
   const phase     = sim.dayPhase ?? 0;
   const timeIcon  = phase>=NIGHT_START?'🌙':phase>=DUSK_START?'🌆':'☀️';
   const filteredNarr = (sim.narrative||[]).slice(-50).reverse().filter(e=>!narrFilter||e.id===narrFilter);
-
-  // ── Classement menace (score = kills*40 + dmgDealt*0.1 + level*15) ───────
-  const threatList = [...sim.champions]
-    .filter(c=>c.hp>0)
-    .map(c=>({...c, score: (c.simStats.kills||0)*40 + (c.simStats.dmgDealt||0)*0.1 + (c.level||1)*15}))
-    .sort((a,b)=>b.score-a.score);
 
   // ── Dernier commentaire César ─────────────────────────────────────────────
   const lastCaesar = (sim.caesarLog||[])[0] || null;
@@ -3176,7 +3168,7 @@ export default function SimulateurScreen() {
 
             {/* Tabs du panneau */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.lTabRow}>
-              {[['events','⚔️'],['cesar','🎙'],['moments','⭐'],['menaces','🔥'],['sponsor','🎁']].map(([k,ico])=>(
+              {[['events','⚔️'],['cesar','🎙'],['moments','⭐'],['sponsor','🎁']].map(([k,ico])=>(
                 <TouchableOpacity key={k} style={[s.lTab,panelTab===k&&s.lTabActive]} onPress={()=>setPanelTab(k)}>
                   <Text style={[s.lTabTxt,panelTab===k&&{color:'#e2b96f'}]}>{ico}</Text>
                 </TouchableOpacity>
@@ -3219,35 +3211,9 @@ export default function SimulateurScreen() {
                       ))}
                 </ScrollView>
               )}
-              {panelTab==='menaces'&&(
-                <ScrollView style={s.lLog} contentContainerStyle={{padding:6}}>
-                  <Text style={s.logE2}>CLASSEMENT MENACE</Text>
-                  {threatList.map((c,i)=>(
-                    <View key={c.id} style={s.threatRow}>
-                      <Text style={s.threatRank}>{i===0?'🔥':i===1?'⚔️':i===2?'💀':`${i+1}`}</Text>
-                      <View style={[s.dot,{backgroundColor:c.color,width:8,height:8,borderRadius:4}]}/>
-                      <Text style={[s.threatName,{color:c.color}]} numberOfLines={1}>{c.name}</Text>
-                      <Text style={s.threatScore}>{Math.round(c.score)}</Text>
-                    </View>
-                  ))}
-                  {threatList.length===0&&<Text style={s.logE}>Tout le monde est mort...</Text>}
-                  <Text style={[s.logE2,{marginTop:10}]}>JOURNAL INTIME</Text>
-                  {alive.slice(0,4).map(c=>{
-                    const thought = (c._journal||[]).find(j=>j.sub==='thought');
-                    if (!thought) return null;
-                    return (
-                      <View key={c.id} style={[s.thoughtEntry,{borderLeftColor:c.color}]}>
-                        <Text style={[s.thoughtName,{color:c.color}]}>{c.name}</Text>
-                        <Text style={s.thoughtTxt}>"{thought.text}"</Text>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-              )}
               {panelTab==='sponsor'&&(
                 <SponsorPanel
                   sim={sim} alive={alive} mySimChamp={mySimChamp}
-                  sponsorHeal={sponsorHeal}
                   active={active} compact
                   onSelectPackage={pkg=>{ setSelectedPkg(pkg); setPanelTab('events'); }}
                 />
@@ -3324,7 +3290,7 @@ export default function SimulateurScreen() {
 
       {/* TABS */}
       <View style={s.tabs}>
-        {[['events','⚔️ COMBAT'],['cesar','🎙 CÉSAR'],['moments','⭐ MOMENTS'],['menaces','🔥 MENACES'],['sponsor','🎁 SPONSOR']].map(([t,lbl])=>(
+        {[['events','⚔️ COMBAT'],['cesar','🎙 CÉSAR'],['moments','⭐ MOMENTS'],['sponsor','🎁 SPONSOR']].map(([t,lbl])=>(
           <TouchableOpacity key={t} style={[s.tab,panelTab===t&&s.tabActive]} onPress={()=>setPanelTab(t)}>
             <Text style={[s.tabTxt,panelTab===t&&s.tabTxtActive]}>{lbl}</Text>
           </TouchableOpacity>
@@ -3403,48 +3369,9 @@ export default function SimulateurScreen() {
                 </View>
               ))}
         </ScrollView>
-      ) : panelTab==='menaces' ? (
-        <ScrollView style={s.story} contentContainerStyle={{padding:10}}>
-          <Text style={s.logE2}>CLASSEMENT MENACE</Text>
-          {threatList.map((c,i)=>(
-            <View key={c.id} style={s.threatRow}>
-              <Text style={s.threatRank}>{i===0?'🔥':i===1?'⚔️':i===2?'💀':`${i+1}`}</Text>
-              <View style={[s.dot,{backgroundColor:c.color,width:8,height:8,borderRadius:4}]}/>
-              <Text style={[s.threatName,{color:c.color}]} numberOfLines={1}>{c.name}</Text>
-              <Text style={s.threatScore}>{Math.round(c.score)}</Text>
-            </View>
-          ))}
-          <Text style={[s.logE2,{marginTop:14}]}>JOURNAL INTIME</Text>
-          {alive.map(c=>{
-            const thought = (c._journal||[]).find(j=>j.sub==='thought');
-            if (!thought) return null;
-            return (
-              <View key={c.id} style={[s.thoughtEntry,{borderLeftColor:c.color}]}>
-                <Text style={[s.thoughtName,{color:c.color}]}>{c.name}</Text>
-                <Text style={s.thoughtTxt}>"{thought.text}"</Text>
-              </View>
-            );
-          })}
-          {/* Fil narratif filtré */}
-          <Text style={[s.logE2,{marginTop:14}]}>FIL NARRATIF</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filterRow} contentContainerStyle={s.filterInner}>
-            <TouchableOpacity style={[s.filterChip,!narrFilter&&s.filterActive]} onPress={()=>setNarrFilter(null)}>
-              <Text style={[s.filterTxt,!narrFilter&&s.filterActiveTxt]}>Tous</Text>
-            </TouchableOpacity>
-            {sim.champions.map(c=>(
-              <TouchableOpacity key={c.id} style={[s.filterChip,narrFilter===c.id&&{backgroundColor:c.color+'33',borderColor:c.color}]}
-                onPress={()=>setNarrFilter(narrFilter===c.id?null:c.id)}>
-                <View style={[s.fDot,{backgroundColor:c.hp?c.color:'#444'}]}/>
-                <Text style={[s.filterTxt,narrFilter===c.id&&{color:c.color}]}>{c.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {filteredNarr.map((e,i)=><NarrCard key={i} e={e} champs={sim.champions}/>)}
-        </ScrollView>
       ) : /* sponsor */ (
         <SponsorPanel
           sim={sim} alive={alive} mySimChamp={mySimChamp}
-          sponsorHeal={sponsorHeal}
           active={active}
           onSelectPackage={pkg=>{ setSelectedPkg(pkg); setPanelTab('events'); }}
         />
@@ -3890,7 +3817,7 @@ function MatchStat({l,v}) {
 }
 
 // ── Sponsor Panel — nouveau design : inventaire + drop sur carte ─────────
-function SponsorPanel({sim, alive, mySimChamp, sponsorHeal, active, compact, onSelectPackage}) {
+function SponsorPanel({sim, alive, mySimChamp, active, compact, onSelectPackage}) {
   const pts = sim.sponsorPts || 0;
   const inv = sim.packageInventory || {};
   const isDanger   = mySimChamp && mySimChamp.hp > 0 && mySimChamp.hp / mySimChamp.maxHp < 0.30;
@@ -3904,7 +3831,7 @@ function SponsorPanel({sim, alive, mySimChamp, sponsorHeal, active, compact, onS
       style={compact ? sp.scrollCompact : sp.scroll}
       contentContainerStyle={{padding: compact ? 6 : 10}}
     >
-      {/* ── Alerte danger ───────────────────────────────────────────── */}
+      {/* ── Alerte danger (sans bouton soin direct) ──────────────────── */}
       {isDanger && mySimChamp && (
         <View style={[sp.dangerBox, isCritical && sp.dangerBoxCrit]}>
           <Text style={sp.dangerIco}>{isCritical?'🚨':'⚠️'}</Text>
@@ -3917,11 +3844,6 @@ function SponsorPanel({sim, alive, mySimChamp, sponsorHeal, active, compact, onS
               ({Math.round(mySimChamp.hp/mySimChamp.maxHp*100)}%)
             </Text>
           </View>
-          <TouchableOpacity
-            style={[sp.dangerBtn, pts<5&&{opacity:0.4}]}
-            onPress={()=>pts>=5&&sponsorHeal(mySimChamp.id)}>
-            <Text style={sp.dangerBtnTxt}>💉 5⭐</Text>
-          </TouchableOpacity>
         </View>
       )}
 
@@ -3963,11 +3885,6 @@ function SponsorPanel({sim, alive, mySimChamp, sponsorHeal, active, compact, onS
               <Text style={sp.champMetaTxt}>⚠️ {nearThreats.length} ennemi{nearThreats.length>1?'s':''}</Text>
             )}
           </View>
-          <TouchableOpacity
-            style={[sp.healBtn, pts<5&&{opacity:0.4}]}
-            onPress={()=>pts>=5&&sponsorHeal(mySimChamp.id)}>
-            <Text style={sp.healBtnTxt}>💉 Soins d'urgence (+120 PV) — 5⭐</Text>
-          </TouchableOpacity>
         </View>
       )}
 

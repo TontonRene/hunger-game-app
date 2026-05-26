@@ -602,7 +602,7 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   } else if (isMoving) {
     animName = 'walk';  animFps = 9;  animFrames = 9;
   } else {
-    animName = 'idle';  animFps = 6;  animFrames = 9;
+    animName = 'idle';  animFps = 2;  animFrames = 2;
   }
   const frameIdx = Math.floor(t * animFps) % animFrames;
 

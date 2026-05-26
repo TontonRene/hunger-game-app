@@ -1151,7 +1151,8 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
   (v.fauna || []).forEach(f => {
     if (f.hp <= 0) return;
     const fh  = hm ? getElev(f.x, f.y, hm) : 1;
-    const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh + 0.3);
+    // Animaux collés au sol (anti-lévitation)
+    const { ix:fix, iy:fiy } = wToIso(f.x, f.y, fh);
     const fsx = W/2 + (fix - camIx) * zoom;
     const fsy = H/2 + (fiy - camIy) * zoom;
     if (fsx < -80 || fsx > W+80 || fsy < -80 || fsy > H+80) return;
@@ -1725,14 +1726,14 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
       // Détection changement de follow → ajuster zoom cible
       if (fId !== prevFollowId.current) {
         if (fId) {
-          // Zoom fort sur le champion (bien centré, bien visible)
-          targetZoom.current = 8.0;
+          // Zoom légèrement réduit (POV plus ouvert) — était 8.0
+          targetZoom.current = 6.8;
           // Snap immédiat sur le champion (pas de lerp au 1er frame)
           const fcSnap = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
           if (fcSnap) {
             const { ix: six, iy: siy } = wToIso(fcSnap.x, fcSnap.y, 0);
             camIx.current = six;
-            camIy.current = siy;
+            camIy.current = siy - 25;  // décalage Y pour caméra plus haute (perso plus bas dans le frame)
           }
         } else {
           // Retour vue globale → recentrer la caméra sur la map
@@ -1751,12 +1752,11 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
         const fc = gvisRef.current.champions.find(cv => cv.id === fId && !cv.isDead);
         if (fc) {
           const hm = gvisRef.current.heightMap;
-          // Camera target : position au sol (élévation ignorée) pour éviter
-          // que les pics de montagne décalent la caméra hors de la carte
+          // Camera target : position au sol + offset Y pour caméra plus haute
           const { ix: tix, iy: tiy } = wToIso(fc.x, fc.y, 0);
-          // Lerp rapide (18%) pour ne pas rester en mode "écran noir" trop longtemps
+          const camYOffset = -25;  // décalage caméra vers le haut
           camIx.current += (tix - camIx.current) * 0.18;
-          camIy.current += (tiy - camIy.current) * 0.18;
+          camIy.current += ((tiy + camYOffset) - camIy.current) * 0.18;
         } else {
           // Champion mort → libérer caméra
           gvisRef.current.followId = null;

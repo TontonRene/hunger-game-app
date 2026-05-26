@@ -2198,31 +2198,39 @@ function tickSim(prev) {
           f._wX = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
           f._wY = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
         }
-        // *6 au lieu de *3 : mouvement clairement visible sur la carte
-        f.x += sign(f._wX-f.x)*def.speed*6 + noise(4);
-        f.y += sign(f._wY-f.y)*def.speed*6 + noise(4);
+        // Vitesse réduite (*2.5 au lieu de *6) — animaux moins frénétiques
+        f.x += sign(f._wX-f.x)*def.speed*2.5 + noise(2);
+        f.y += sign(f._wY-f.y)*def.speed*2.5 + noise(2);
       }
     } else {
       // Cerfs/lapins : fuient si proche, sinon déambulent vers cible
       if (nearChamp && d < def.fearRange) {
-        f.x += sign(f.x - nearChamp.x)*def.speed*5+noise(3);
-        f.y += sign(f.y - nearChamp.y)*def.speed*5+noise(3);
+        f.x += sign(f.x - nearChamp.x)*def.speed*2.2+noise(2);
+        f.y += sign(f.y - nearChamp.y)*def.speed*2.2+noise(2);
       } else {
         if (!f._wX || !f._wY || Math.hypot(f.x-f._wX, f.y-f._wY) < 60) {
           f._wX = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
           f._wY = rng(ISLAND_EDGE+100, WORLD-ISLAND_EDGE-100);
         }
-        // *6 au lieu de *3 : mouvement clairement visible sur la carte
-        f.x += sign(f._wX-f.x)*def.speed*6 + noise(4);
-        f.y += sign(f._wY-f.y)*def.speed*6 + noise(4);
+        // Vitesse réduite
+        f.x += sign(f._wX-f.x)*def.speed*2.5 + noise(2);
+        f.y += sign(f._wY-f.y)*def.speed*2.5 + noise(2);
       }
     }
     f.x = clamp(f.x, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     f.y = clamp(f.y, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
-    // Animation : isMoving + direction
+    // Animation : isMoving + direction 4-way isométrique
+    // Sprites animaux : row 0=SE, 1=SW, 2=NE, 3=NW (iso, vu de 3/4)
     const dx = f.x - prevX, dy = f.y - prevY;
-    f.isMoving = Math.abs(dx) > 2 || Math.abs(dy) > 2;
-    if (f.isMoving) f.dirRow = dx < 0 ? 1 : 0;
+    f.isMoving = Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5;
+    if (f.isMoving) {
+      const goingRight = dx >= 0;        // E si dx>=0, W sinon
+      const goingDown  = dy >= 0;        // S (vers caméra) si dy>=0, N sinon
+      if      ( goingRight &&  goingDown) f.dirRow = 0;  // SE
+      else if (!goingRight &&  goingDown) f.dirRow = 1;  // SW
+      else if ( goingRight && !goingDown) f.dirRow = 2;  // NE
+      else                                f.dirRow = 3;  // NW
+    }
   });
 
   // Chasse : champion à portée d'une proie non-aggressive → kill + nourriture

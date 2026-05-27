@@ -920,7 +920,7 @@ function createSimState(cfg={}) {
     matchStats:{ totalCombats:0, totalCrafts:0, waterDeaths:0, alliancesFormed:0, betrayals:0 },
     map:{
       biome,
-      width:mapW, height:mapW,    // mapW = WORLD × scale
+      width:WORLD, height:WORLD,  // WORLD a déjà été mis à jour par _applyMapScale(scale)
       mapSeed,
       pois:scaledPOIs,
       loots:[],

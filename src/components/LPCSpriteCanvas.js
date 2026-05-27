@@ -302,11 +302,12 @@ export default function LPCSpriteCanvas({
     canvas.drawPath(shadowPath, shadowPaint);
 
     // Calcul de la destination : le sprite LPC 64×64 centré dans le canvas
-    // On garde les proportions et on met le sprite dans les 80% du canvas
+    // On garde les proportions et on met le sprite dans les 88% du canvas
     const sprH = height * 0.88;
     const sprW = sprH;  // LPC cell est carré (64×64)
-    const dstX = (width  - sprW) / 2;
-    const dstY = (height - sprH) * 0.55; // légèrement au-dessus du centre
+    // Léger nudge à gauche pour compenser asymétrie du sprite + remonté plus haut
+    const dstX = (width  - sprW) / 2 - width * 0.02;   // un poil à gauche
+    const dstY = (height - sprH) * 0.25;               // proche du haut au lieu du centre
     const dst  = Skia.XYWHRect(dstX, dstY, sprW, sprH);
 
     const LPC_CELL = 64;

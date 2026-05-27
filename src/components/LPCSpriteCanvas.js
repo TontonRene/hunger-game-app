@@ -13,8 +13,10 @@ function _hashId(id) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
-const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0'];
-const _HAIR_COLS  = ['#1a0800','#3d1c02','#d4a017','#c05000','#505050','#f0e0c0','#800000','#000000'];
+const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0','#a07050','#6a3820'];
+const _HAIR_COLS  = ['#1a0800','#3d1c02','#d4a017','#c05000','#505050','#f0e0c0','#800000','#000000','#5a2a08','#8b4513','#a0522d','#deb887'];
+const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#ff6b9d','#00b894','#fd79a8','#6c5ce7','#fdcb6e','#e17055','#74b9ff','#a29bfe','#55efc4'];
+const _PANTS_COLS = ['#2c3e50','#1a1a2e','#3d1c02','#0d3d56','#1e3c1a','#4a235a','#34495e','#403030'];
 const _LPC_BODY   = ['male', 'female'];
 const _LPC_HAIR   = ['bob', 'braid', 'bangs', 'afro', 'buzzcut', 'cornrows', 'curly', 'long'];
 const _LPC_TORSO  = ['shirt', 'tshirt', 'leather', 'plate'];
@@ -24,17 +26,21 @@ function generateLook(id) {
   const h0 = _hashId(id);
   const h1 = (Math.imul(h0 ^ (h0 >>> 16), 0x45d9f3b)) >>> 0;
   const h2 = (Math.imul(h1 ^ (h1 >>> 16), 0x45d9f3b)) >>> 0;
-  const h5 = (Math.imul((Math.imul((Math.imul(h2 ^ (h2>>>13), 0x9e3779b9))>>>0 ^ ((Math.imul(h2 ^ (h2>>>13), 0x9e3779b9))>>>0)>>>11, 0x6c62272e))>>>0 ^ ((Math.imul((Math.imul(h2 ^ (h2>>>13), 0x9e3779b9))>>>0 ^ ((Math.imul(h2 ^ (h2>>>13), 0x9e3779b9))>>>0)>>>11, 0x6c62272e))>>>0)>>>15, 0x165667b1)) >>> 0;
+  const h3 = (Math.imul(h2 ^ (h2 >>> 13), 0xc2b2ae35)) >>> 0;
+  const h4 = (Math.imul(h3 ^ (h3 >>> 16), 0x85ebca6b)) >>> 0;
+  const h5 = (Math.imul(h4 ^ (h4 >>> 16), 0x9e3779b9)) >>> 0;
   const h6 = (Math.imul(h5 ^ (h5 >>> 17), 0x27d4eb2f)) >>> 0;
   const h7 = (Math.imul(h6 ^ (h6 >>> 13), 0x85ebca6b)) >>> 0;
   return {
-    bodyType: _LPC_BODY [h5 % _LPC_BODY.length],
-    hair:     _LPC_HAIR [h6 % _LPC_HAIR.length],
-    torso:    _LPC_TORSO[h7 % _LPC_TORSO.length],
-    legs:     _LPC_LEGS [h1 % _LPC_LEGS.length],
-    feet:     'boots',
-    skinTint: _SKIN_COLS[h1 % _SKIN_COLS.length],
-    hairTint: _HAIR_COLS[h2 % _HAIR_COLS.length],
+    bodyType:  _LPC_BODY  [h5 % _LPC_BODY.length],
+    hair:      _LPC_HAIR  [h6 % _LPC_HAIR.length],
+    torso:     _LPC_TORSO [h7 % _LPC_TORSO.length],
+    legs:      _LPC_LEGS  [h1 % _LPC_LEGS.length],
+    feet:      'boots',
+    skinTint:  _SKIN_COLS [h1 % _SKIN_COLS.length],
+    hairTint:  _HAIR_COLS [h2 % _HAIR_COLS.length],
+    shirtTint: _SHIRT_COLS[h3 % _SHIRT_COLS.length],
+    pantsTint: _PANTS_COLS[h4 % _PANTS_COLS.length],
   };
 }
 
@@ -53,6 +59,20 @@ function _mkSpriteP(alpha) {
   const p = Skia.Paint();
   p.setAlphaf(Math.max(0, Math.min(1, alpha)));
   return p;
+}
+
+// ── Peinture avec teinte (ColorFilter MakeBlend Modulate)
+// même technique que BattleMap — fonctionne dans PictureRecorder
+function _mkTintP(col, alpha) {
+  if (!col) return _mkSpriteP(alpha);
+  try {
+    const p = Skia.Paint();
+    p.setAlphaf(Math.max(0, Math.min(1, alpha)));
+    p.setColorFilter(Skia.ColorFilter.MakeBlend(Skia.Color(col), BlendMode.Modulate));
+    return p;
+  } catch (_) {
+    return _mkSpriteP(alpha);
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -251,7 +271,8 @@ export default function LPCSpriteCanvas({
 
   // ── Look résolu ──────────────────────────────────────────────────────
   const resolvedLook = look || generateLook(championId || 'default');
-  const { bodyType, hair, torso, legs } = resolvedLook;
+  const { bodyType, hair, torso, legs,
+          skinTint, hairTint, shirtTint, pantsTint } = resolvedLook;
   const isDead = animState === 'death';
 
   // ── Rendu Picture Skia ───────────────────────────────────────────────
@@ -291,28 +312,27 @@ export default function LPCSpriteCanvas({
     const LPC_CELL = 64;
     const srcRect  = Skia.XYWHRect(frame * LPC_CELL, dirRow * LPC_CELL, LPC_CELL, LPC_CELL);
     const alpha    = isDead ? 0.38 : 1.0;
-    const p        = Skia.Paint(); p.setAlphaf(alpha);
 
     // Offsets pour cheveux/torso (alignement avec body modifié à têtes ajoutées)
-    // Les cheveux flottaient au-dessus → on les ramène au niveau du body
-    const HAIR_DX  =  sprW * 0.005;   // quasi centré
-    const HAIR_DY  =  sprH * 0.045;   // un peu vers le bas pour poser sur la tête
+    const HAIR_DX  =  sprW * 0.005;
+    const HAIR_DY  =  sprH * 0.045;
     const TORSO_DX =  sprW * 0.005;
     const TORSO_DY =  sprH * 0.015;
     const dstHair  = Skia.XYWHRect(dstX + HAIR_DX,  dstY + HAIR_DY,  sprW, sprH);
     const dstTorso = Skia.XYWHRect(dstX + TORSO_DX, dstY + TORSO_DY, sprW, sprH);
 
-    // 5 couches : body → legs → feet → torso → hair
+    // 5 couches avec teintes individuelles : body=peau, legs=pantalon, feet=neutre,
+    // torso=chemise, hair=cheveux
     const layers = [
-      [`body_${bodyType}_${animName}`, dst      ],
-      [`legs_${legs}_${animName}`,      dst      ],
-      [`feet_boots_${animName}`,        dst      ],
-      [`torso_${torso}_${animName}`,    dstTorso ],
-      [`hair_${hair}_${animName}`,      dstHair  ],
+      [`body_${bodyType}_${animName}`,  dst,      _mkTintP(skinTint,  alpha)],
+      [`legs_${legs}_${animName}`,       dst,      _mkTintP(pantsTint, alpha)],
+      [`feet_boots_${animName}`,         dst,      _mkSpriteP(alpha)         ],
+      [`torso_${torso}_${animName}`,     dstTorso, _mkTintP(shirtTint, alpha)],
+      [`hair_${hair}_${animName}`,       dstHair,  _mkTintP(hairTint,  alpha)],
     ];
-    for (const [key, layerDst] of layers) {
+    for (const [key, layerDst, layerPaint] of layers) {
       const img = imgs[key];
-      if (img) canvas.drawImageRect(img, srcRect, layerDst, p);
+      if (img) canvas.drawImageRect(img, srcRect, layerDst, layerPaint);
     }
 
     // Croix pour mort
@@ -333,7 +353,7 @@ export default function LPCSpriteCanvas({
     return rec.finishRecordingAsPicture();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, animName, dirRow, width, height, bgColor, bodyType, hair, torso, legs, isDead,
-      // Rebuild when any image loads (tracked via frame bump)
+      skinTint, hairTint, shirtTint, pantsTint,
       imgBodyMaleWalk, imgBodyMaleIdle, imgBodyMaleSlash, imgBodyMaleHurt,
       imgBodyFemaleWalk, imgBodyFemaleIdle, imgBodyFemaleSlash, imgBodyFemaleHurt]);
 

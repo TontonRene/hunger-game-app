@@ -514,10 +514,11 @@ function _hashId(id) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
-const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#ff6b9d','#00b894','#fd79a8','#6c5ce7','#e84393'];
-const _PANTS_COLS = ['#2c3e50','#4a235a','#1a5276','#145a32','#6e2f0a','#17202a','#7f8c8d','#5d4037'];
-const _HAIR_COLS  = ['#d4a017','#c87941','#f5deb3','#a0522d','#cd853f','#deb887','#b8860b','#e07b39'];
-const _SKIN_COLS  = ['#ffe0c8','#d4956a','#c08050','#8a5030','#ffd8b0'];
+const _SHIRT_COLS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#ff6b9d','#00b894','#fd79a8','#6c5ce7','#fdcb6e','#e17055','#74b9ff','#a29bfe','#55efc4'];
+const _PANTS_COLS = ['#2c3e50','#1a1a2e','#3d1c02','#0d3d56','#1e3c1a','#4a235a','#34495e','#403030'];
+// Variations cheveux : noir, brun, châtain, blond, gris, blanc, rouge, brun-roux, etc.
+const _HAIR_COLS  = ['#1a0800','#3d1c02','#5a2a08','#8b4513','#a0522d','#d4a017','#deb887','#f0e0c0','#505050','#c0c0c0','#800000','#c05000','#000000'];
+const _SKIN_COLS  = ['#ffe0c8','#ffd8b0','#f5d0a0','#d4956a','#c08050','#a07050','#8a5030','#6a3820'];
 // ── LPC look pools ───────────────────────────────────────────────────────
 const _LPC_BODY  = ['male', 'female'];
 const _LPC_HAIR  = ['bob', 'braid', 'bangs', 'afro', 'buzzcut', 'cornrows', 'curly', 'long'];

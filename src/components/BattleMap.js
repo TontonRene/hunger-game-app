@@ -703,11 +703,11 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     const srcRect  = Skia.XYWHRect(frameIdx * LPC_CELL, lpcDirRow * LPC_CELL, LPC_CELL, LPC_CELL);
     const dst      = Skia.XYWHRect(spX, spYfinal, spW, spH);
     // Offsets relatifs à la taille du sprite, pour aligner cheveux/torso
-    // avec le nouveau body modifié (têtes ajoutées). Ajustables.
-    const HAIR_DX  =  spW * 0.030;   // +X = vers la droite
-    const HAIR_DY  = -spH * 0.060;   // -Y = vers le haut
-    const TORSO_DX =  spW * 0.020;
-    const TORSO_DY = -spH * 0.030;
+    // avec le body modifié (têtes ajoutées). Cheveux légèrement vers le bas.
+    const HAIR_DX  =  spW * 0.005;   // quasi centré
+    const HAIR_DY  =  spH * 0.045;   // vers le bas pour poser sur la tête
+    const TORSO_DX =  spW * 0.005;
+    const TORSO_DY =  spH * 0.015;
     const dstHair  = Skia.XYWHRect(spX + HAIR_DX,  spYfinal + HAIR_DY,  spW, spH);
     const dstTorso = Skia.XYWHRect(spX + TORSO_DX, spYfinal + TORSO_DY, spW, spH);
     const {

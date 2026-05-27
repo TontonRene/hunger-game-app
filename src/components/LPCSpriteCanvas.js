@@ -294,10 +294,11 @@ export default function LPCSpriteCanvas({
     const p        = Skia.Paint(); p.setAlphaf(alpha);
 
     // Offsets pour cheveux/torso (alignement avec body modifié à têtes ajoutées)
-    const HAIR_DX  =  sprW * 0.030;
-    const HAIR_DY  = -sprH * 0.060;
-    const TORSO_DX =  sprW * 0.020;
-    const TORSO_DY = -sprH * 0.030;
+    // Les cheveux flottaient au-dessus → on les ramène au niveau du body
+    const HAIR_DX  =  sprW * 0.005;   // quasi centré
+    const HAIR_DY  =  sprH * 0.045;   // un peu vers le bas pour poser sur la tête
+    const TORSO_DX =  sprW * 0.005;
+    const TORSO_DY =  sprH * 0.015;
     const dstHair  = Skia.XYWHRect(dstX + HAIR_DX,  dstY + HAIR_DY,  sprW, sprH);
     const dstTorso = Skia.XYWHRect(dstX + TORSO_DX, dstY + TORSO_DY, sprW, sprH);
 

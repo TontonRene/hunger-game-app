@@ -18,8 +18,8 @@ const _CLIP_INTERSECT = 1;
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
 const TILE_H   = 12;   // hauteur du losange
 const TILE_Z   = 8;    // pixels par unité d'élévation
-const HM_CELLS = 60;   // grille heightmap 60×60 (×3 pour grande map)
-const HM_CELL  = 5;    // unités monde par cellule (300/60 = 5 — internal 0-300)
+const HM_CELLS = 20;   // grille heightmap 20×20 (revert : était 60)
+const HM_CELL  = 5;    // unités monde par cellule (100/20 = 5)
 
 // ── Palettes champion / supply ────────────────────────────────────────────
 const CHAMP_COLORS = [
@@ -248,9 +248,9 @@ function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
 }
 
 // Centre iso de la map (pour camera par défaut)
-// Map interne 0-300 (HM_CELLS=60 × HM_CELL=5) → centre à 150
+// Map interne 0-100 (HM_CELLS=20 × HM_CELL=5) → centre à 50
 function mapCenterIso() {
-  const { ix, iy } = wToIso(150, 150, 1);
+  const { ix, iy } = wToIso(50, 50, 1);
   return { ix, iy: iy + 8 };
 }
 
@@ -325,33 +325,98 @@ function _tileRng(gx, gy, idx) {
 
 // ── Table de tiles par biome — iso_tiles.png (352×352, grille 11×11, 32×32/tile)
 // Index i → col=i%11, row=floor(i/11)
-// row0 (0-10)  : terre brune plate
-// row1 (11-21) : terre brune variante
-// row2 (22-32) : herbe verte sur terre
-// row3 (33-43) : végétation dense
-// row4 (44-54) : fleurs / plantes colorées
-// row5 (55-65) : rochers bruns
-// row6 (66-76) : pierres plates bleues/grises
-// row7 (77-87) : cailloux gris
-// row8 (88-98) : dalles sombres
-// row9 (99-109): eau profonde (losange bleu)
-// row10(110-114): eau claire / glace
+// row0 (0-10)   : terre brune plate / variantes
+// row1 (11-21)  : terre brune rocaille / fissures
+// row2 (22-32)  : herbe verte sur terre / variantes
+// row3 (33-43)  : végétation dense
+// row4 (44-54)  : fleurs (44-46) / fleurs colorées (47) / rondins (48-52) / pierres (53-54)
+// row5 (55-65)  : rochers bruns / variantes
+// row6 (66-76)  : pierres plates bleues-grises (66-68) + glace (69-76)
+// row7 (77-87)  : cailloux/glace (77-81) / particules eau (82-86) / vide (87)
+// row8 (88-98)  : eau peu profonde (88-90) / eau claire variée (91-98)
+// row9 (99-109) : eau profonde (99) + eau de surface variée (100-109)
+// row10(110-120): eau claire vagues (110) / glace fine (111-117) / glace (118-120)
+//
+// Chaque biome × hauteur = liste de tiles possibles. Pick aléatoire avec hash gx,gy.
 const _BTILES = {
-  //          h0   h1   h2   h3   h4   h5   h6   h7
-  'forêt':   [ 99,   0,   1,  22,  22,  33,  33,  55],
-  'désert':  [ 99,   0,   0,   1,   1,  11,  55,  55],
-  'toundra': [110,  88,  88,  66,  66,  77,  77,  55],
-  'marais':  [ 99,  88,   0,  22,  22,  33,  66,  77],
-  'montagne':[ 99,   0,  11,  55,  55,  66,  66,  77],
-  'volcan':  [ 99,   0,   0,   1,  11,  55,  55,  66],
-  'jungle':  [ 99,  22,  22,  33,  33,  44,  44,  55],
+  'forêt': [
+    [99],                                                  // h0 : eau
+    [0, 1, 4, 5, 6, 14, 15],                              // h1 : terre nue variée
+    [1, 2, 3, 14, 15, 19, 25, 26],                        // h2 : terre + transition herbe
+    [22, 23, 24, 27, 28, 29, 30],                         // h3 : herbe variée
+    [22, 23, 24, 27, 28, 29, 30, 41, 47],                 // h4 : herbe + qq fleurs
+    [33, 34, 35, 36, 37, 41, 42, 49, 51],                 // h5 : végétation dense + rondins
+    [33, 34, 35, 36, 37, 49, 50, 51, 52],                 // h6 : forêt sombre + rondins moussus
+    [55, 56, 57, 58, 59, 60],                             // h7 : rocher
+  ],
+  'désert': [
+    [99],
+    [0, 4, 5, 6, 7, 8, 9, 10],                            // sable varié
+    [0, 4, 5, 6, 7, 14, 15, 16, 17, 18],                  // sable + dunes
+    [1, 2, 3, 14, 15, 16, 17, 18, 19, 20],                // dunes mixtes
+    [1, 2, 14, 15, 19, 20, 21, 53, 54],                   // dunes + pierres isolées
+    [11, 12, 13, 14, 15, 19, 20, 53, 54],                 // sable rocailleux
+    [55, 56, 57, 58, 59, 60],                             // rochers brûlés
+    [55, 56, 57, 58, 59, 60, 61, 62],                     // rochers gris
+  ],
+  'toundra': [
+    [110, 111, 112, 113, 114],                            // eau glacée variée
+    [88, 89, 90, 91, 92, 93, 115, 116, 117],              // eau peu profonde glacée
+    [88, 89, 90, 91, 92, 93, 100, 101, 118, 119, 120],    // glace fine
+    [66, 67, 68, 75, 76, 80, 81],                         // pierre + glace
+    [66, 67, 68, 75, 76, 80, 81],                         // idem
+    [69, 70, 71, 72, 73, 74, 77, 78, 79],                 // rochers glacés
+    [69, 70, 71, 72, 73, 74, 77, 78, 79],
+    [55, 56, 57, 58, 59, 60],                             // pics rocheux
+  ],
+  'marais': [
+    [99, 100, 101, 102, 103, 104],                        // eau profonde stagnante
+    [88, 89, 90, 94, 95, 96, 97, 98],                     // eau peu profonde
+    [0, 1, 2, 19, 25, 26],                                // boue
+    [22, 23, 24, 27, 28, 29, 30],                         // herbe humide
+    [22, 23, 24, 27, 28, 29, 30, 41, 47],                 // herbe + fleurs
+    [33, 34, 35, 36, 37, 49, 50, 51, 52],                 // végétation + rondins moussus
+    [66, 67, 68, 75, 76],                                 // pierre humide
+    [77, 78, 79, 80, 81],                                 // cailloux
+  ],
+  'montagne': [
+    [99],
+    [0, 1, 4, 5, 6],                                      // terre montagne
+    [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],         // rocaille
+    [55, 56, 57, 58, 59, 60],                             // rochers bruns
+    [55, 56, 57, 58, 59, 60, 61, 62],                     // rochers mixtes
+    [66, 67, 68, 75, 76],                                 // pierre plate
+    [66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76],         // pierre + glace
+    [77, 78, 79, 80, 81],                                 // pics neigeux
+  ],
+  'volcan': [
+    [99],
+    [0, 4, 5, 6, 7],                                      // cendres
+    [0, 4, 5, 6, 7, 14, 15, 16, 17, 18],                  // cendres + roche
+    [1, 2, 3, 14, 15, 16, 17, 18, 19, 20],                // basalte fendu
+    [11, 12, 13, 14, 15, 16, 17, 18],                     // roche volcanique
+    [55, 56, 57, 58, 59, 60],                             // rochers chauds
+    [55, 56, 57, 58, 59, 60, 61, 62],                     // rochers gris
+    [66, 67, 68],                                         // sommets refroidis
+  ],
+  'jungle': [
+    [99],
+    [22, 23, 24, 27, 28, 29, 30],                         // herbe luxuriante
+    [22, 23, 24, 27, 28, 29, 30, 31, 32],                 // herbe + arbustes
+    [33, 34, 35, 36, 37, 38, 39, 40],                     // végétation dense
+    [33, 34, 35, 36, 37, 38, 39, 40, 41, 42],             // dense + fleurs
+    [44, 45, 46, 41, 42, 43, 47, 49, 51],                 // fleurs colorées + rondins
+    [44, 45, 46, 41, 42, 49, 50, 51, 52],                 // fleurs + rondins moussus
+    [55, 56, 57, 58, 59, 60],                             // rochers
+  ],
 };
 function _isoTileIdx(biome, h, gx, gy) {
   const arr = _BTILES[biome] || _BTILES['forêt'];
-  const base = arr[Math.min(h, arr.length - 1)];
-  if (h === 0) return base;  // eau : pas de variation
-  const rng = _tileRng(gx, gy, 6);
-  return base + (rng < 0.40 ? 0 : rng < 0.72 ? 1 : 2);
+  const opts = arr[Math.min(h, arr.length - 1)] || [0];
+  if (opts.length <= 1) return opts[0];
+  // Hash position pour pick déterministe (pas de scintillement)
+  const r = _tileRng(gx, gy, 6);
+  return opts[Math.floor(r * opts.length) % opts.length];
 }
 
 // Couleurs des flancs (droite/gauche) par rangée du tileset (11 rangées)
@@ -384,6 +449,9 @@ const _CLIFF_L = [
 ];
 
 // ── Dessin d'un cube isométrique avec boucle d'empilement (Tile Stacking) ──
+// Optimisation FPS : au dézoom (zoom < 3) on dessine seulement la couche supérieure
+// → ~7× moins de drawImageRect sur tiles hautes (h=7). Les "sides" sont invisibles
+// à ce niveau de zoom de toute façon.
 function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
@@ -391,8 +459,14 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
   const tH = tW;
   const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
 
-  // Boucle d'empilement vertical du sol (0) jusqu'à la hauteur de la case (h)
-  for (let z = 0; z <= h; z++) {
+  // LOD : zoom faible = couche du haut seulement. Zoom moyen = top + base.
+  // Zoom fort = pile complète.
+  let zStart;
+  if (zoom < 3.0)       zStart = h;          // zoom out fort : juste le haut
+  else if (zoom < 5.0)  zStart = Math.max(0, h - 1);  // zoom moyen : 2 niveaux
+  else                  zStart = 0;          // zoom fort : pile complète
+
+  for (let z = zStart; z <= h; z++) {
     const { ix, iy } = wToIso(gx * HM_CELL, gy * HM_CELL, z);
     const tx = W / 2 + (ix - camIx) * zoom;
     const ty = H / 2 + (iy - camIy) * zoom;
@@ -1219,7 +1293,8 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     const cfg  = FLORA_CFG[fl.type] || { out:'#203010', body:'#507020', bright:'#80b040', shine:'#c0e880' };
     const fr2  = Math.max(4.5, zoom * 2.2);   // bien plus grand
     const idSeed = fl.id ? (fl.id.charCodeAt(5) || fl.id.charCodeAt(0) || 0) : 0;
-    const sway   = Math.sin(t * 1.8 + idSeed) * 1.8;
+    // Sway désactivé : la flore est statique au sol (plus de polygones mobiles)
+    const sway   = 0;
     const gpulse = 0.82 + Math.sin(t * 2.2 + idSeed * 0.1) * 0.18;
 
     // Halo de distance (aide à repérer la ressource)
@@ -1809,12 +1884,12 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     const hm    = battleState.map?.heightMap
       || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
-    // Normalisation → espace monde interne 0-300 (HM_CELLS=60 × HM_CELL=5)
-    // backend = 100×100, simulateur = 5400×5400 → tout vient à 0-300 internes
+    // Normalisation → espace monde interne 0-100 (HM_CELLS=20 × HM_CELL=5)
+    // backend = 100×100, simulateur = mapW×mapH → tout vient à 0-100 internes
     const mapW = battleState.map?.width  || 100;
     const mapH = battleState.map?.height || 100;
-    const sX   = 300 / mapW;
-    const sY   = 300 / mapH;
+    const sX   = 100 / mapW;
+    const sY   = 100 / mapH;
 
     // Pre-compute sorted tiles (une seule fois par heightmap)
     const prevHm = gvisRef.current.heightMap;
@@ -1934,7 +2009,7 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     };
   }, [battleState]);
 
-  // ── Convertit coordonnées écran → monde ──────────────────────────────
+  // ── Convertit coordonnées écran → monde (coords WORLD du simulateur) ─
   const screenToWorld = useCallback((ex, ey) => {
     const H   = canvasHRef.current > 80 ? canvasHRef.current : SH;
     const ix  = (ex - W / 2) / zoom.current + camIx.current;
@@ -1942,10 +2017,16 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     const TW2 = TILE_W / 2, TH2 = TILE_H / 2;
     const gx  = (ix / TW2 + iy / TH2) / 2;
     const gy  = (iy / TH2 - ix / TW2) / 2;
-    const wx  = Math.max(0, Math.min(100, gx * HM_CELL));
-    const wy  = Math.max(0, Math.min(100, gy * HM_CELL));
+    // Internal 0-INTERNAL_MAX → world 0-mapW
+    const INTERNAL_MAX = HM_CELLS * HM_CELL;        // = 100 (HM_CELLS=20, HM_CELL=5)
+    const mapW = battleState?.map?.width  || INTERNAL_MAX;
+    const mapH = battleState?.map?.height || INTERNAL_MAX;
+    const wxInternal = Math.max(0, Math.min(INTERNAL_MAX, gx * HM_CELL));
+    const wyInternal = Math.max(0, Math.min(INTERNAL_MAX, gy * HM_CELL));
+    const wx = wxInternal * (mapW / INTERNAL_MAX);
+    const wy = wyInternal * (mapH / INTERNAL_MAX);
     return { wx, wy };
-  }, [W, SH]);
+  }, [W, SH, battleState]);
 
   // ── Tap handler ───────────────────────────────────────────────────────
   const handleTap = useCallback((ex, ey) => {
@@ -2058,6 +2139,18 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     Gesture.Exclusive(doubleTap, singleTap)
   );
 
+  // ── Preload check : compte les sprites critiques chargés ────────────
+  // Évite l'affichage des fallbacks polygones pendant le chargement async.
+  const _criticalAssets = [
+    imgIsoTiles,
+    lpcBodyMaleIdle, lpcBodyMaleWalk, lpcBodyFemaleIdle, lpcBodyFemaleWalk,
+    imgDeerIdle, imgWolfIdle, imgBoarIdle, imgHareIdle,
+  ];
+  const _totalCritical = _criticalAssets.length;
+  const _loadedCritical = _criticalAssets.filter(Boolean).length;
+  const _isLoading = _loadedCritical < _totalCritical;
+  const _loadPct = Math.round((_loadedCritical / _totalCritical) * 100);
+
   return (
     <View
       style={StyleSheet.absoluteFill}
@@ -2068,6 +2161,21 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
           {picture && <Picture picture={picture} />}
         </Canvas>
       </GestureDetector>
+
+      {/* ── Loading overlay (préchargement des sprites critiques) ──── */}
+      {_isLoading && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <View style={styles.loadingCard}>
+            <Text style={styles.loadingTitle}>⚔️ Préparation de l'arène…</Text>
+            <View style={styles.loadingBar}>
+              <View style={[styles.loadingBarFill, { width: `${_loadPct}%` }]} />
+            </View>
+            <Text style={styles.loadingPct}>
+              {_loadedCritical} / {_totalCritical} assets ({_loadPct}%)
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* ── Overlay cône/ombre en mode drop sponsor ─────────────────── */}
       {dropMode && (
@@ -2123,6 +2231,50 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
 }
 
 const styles = StyleSheet.create({
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(13, 13, 26, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 999,
+  },
+  loadingCard: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#e2b96f',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 26,
+    paddingVertical: 18,
+    minWidth: 260,
+    alignItems: 'center',
+  },
+  loadingTitle: {
+    color: '#e2b96f',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 1.2,
+    marginBottom: 14,
+  },
+  loadingBar: {
+    height: 8,
+    width: 220,
+    backgroundColor: '#0d0d1a',
+    borderRadius: 4,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#33334d',
+  },
+  loadingBarFill: {
+    height: '100%',
+    backgroundColor: '#e2b96f',
+    borderRadius: 4,
+  },
+  loadingPct: {
+    color: '#888',
+    fontSize: 11,
+    marginTop: 8,
+    letterSpacing: 1,
+  },
   povBar: {
     position: 'absolute',
     top: 10, left: 0, right: 0,

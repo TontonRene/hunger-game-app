@@ -20,8 +20,17 @@ const haptic = {
 };
 
 // ── Constantes monde ──────────────────────────────────────────────────────
-const WORLD        = 5400;         // ×18 — île massive (3× le précédent)
-const ISLAND_EDGE  = 504;          // bords = eau (×3)
+// WORLD = taille active de la map. Variable selon mapSize (S/M/L).
+// Mise à jour par createSimState : S=1800, M=2250, L=2700.
+// Toutes les fonctions qui clampent les mouvements/spawns lisent WORLD courant.
+let WORLD          = 1800;         // taille initiale S (référence)
+let ISLAND_EDGE    = 168;          // bords = eau (scale avec WORLD)
+const WORLD_BASE   = 1800;         // référence S immuable
+const EDGE_BASE    = 168;
+function _applyMapScale(scale) {
+  WORLD       = Math.round(WORLD_BASE * scale);
+  ISLAND_EDGE = Math.round(EDGE_BASE  * scale);
+}
 const WATER_DMG    = 3;
 const COMBAT_RANGE = 54;           // référence (combat utilise portées arme)
 const DAY_LEN      = 80;           // vrai cycle jour/nuit
@@ -105,19 +114,19 @@ const FLORA_DEFS = {
   poisonPlant: { food:0,   water:0,  heal:0,  poisonChance:1.0,  label:'Plante toxique' },
 };
 
-// ── POIs — coordonnées ×3 (map ×3) ──────────────────────────────────────
+// ── POIs — coords pour la map S (1800×1800). Scalés dans createSimState pour M/L
 const BASE_POIS = [
-  { id:'caves',      name:'Grottes',        icon:'🌑', x:990,  y:1080, radius:396, effect:'shelter' },
-  { id:'ruins',      name:'Ruines',         icon:'🏚', x:4230, y:1530, radius:324, effect:'craft'   },
-  { id:'river',      name:'Rivière',        icon:'🌊', x:1890, y:3420, radius:288, effect:'water'   },
-  { id:'watchtower', name:'Tour de guet',   icon:'🗼', x:4590, y:3870, radius:216, effect:'vision'  },
-  { id:'forest',     name:'Forêt Dense',    icon:'🌲', x:1170, y:4230, radius:504, effect:'cover'   },
-  { id:'village',    name:'Village',        icon:'🏘', x:3330, y:4860, radius:360, effect:'loot'    },
-  { id:'marsh',      name:'Marécage',       icon:'💧', x:720,  y:2700, radius:420, effect:'water'   },
-  { id:'highland',   name:'Hauteurs',       icon:'⛰', x:4500, y:1080, radius:270, effect:'vision'  },
-  { id:'oldcamp',    name:'Vieux Camp',     icon:'🏕', x:2700, y:4500, radius:330, effect:'shelter' },
-  { id:'hotspring',  name:'Source Chaude',  icon:'♨️', x:4080, y:3000, radius:240, effect:'water'   },
-  { id:'deadforest', name:'Bois Mort',      icon:'🌵', x:1500, y:2100, radius:450, effect:'cover'   },
+  { id:'caves',      name:'Grottes',        icon:'🌑', x:330,  y:360,  radius:132, effect:'shelter' },
+  { id:'ruins',      name:'Ruines',         icon:'🏚', x:1410, y:510,  radius:108, effect:'craft'   },
+  { id:'river',      name:'Rivière',        icon:'🌊', x:630,  y:1140, radius:96,  effect:'water'   },
+  { id:'watchtower', name:'Tour de guet',   icon:'🗼', x:1530, y:1290, radius:72,  effect:'vision'  },
+  { id:'forest',     name:'Forêt Dense',    icon:'🌲', x:390,  y:1410, radius:168, effect:'cover'   },
+  { id:'village',    name:'Village',        icon:'🏘', x:1110, y:1620, radius:120, effect:'loot'    },
+  { id:'marsh',      name:'Marécage',       icon:'💧', x:240,  y:900,  radius:140, effect:'water'   },
+  { id:'highland',   name:'Hauteurs',       icon:'⛰', x:1500, y:360,  radius:90,  effect:'vision'  },
+  { id:'oldcamp',    name:'Vieux Camp',     icon:'🏕', x:900,  y:1500, radius:110, effect:'shelter' },
+  { id:'hotspring',  name:'Source Chaude',  icon:'♨️', x:1360, y:1000, radius:80,  effect:'water'   },
+  { id:'deadforest', name:'Bois Mort',      icon:'🌵', x:500,  y:700,  radius:150, effect:'cover'   },
 ];
 
 // ── Ressources collectables ────────────────────────────────────────────────
@@ -719,10 +728,12 @@ function makeChamp(id, name, colorIdx, spawnRange=[200,700], forcedTraits=null) 
 }
 
 // ── État initial ──────────────────────────────────────────────────────────
+// Tailles de map. scale = facteur appliqué à WORLD, ISLAND_EDGE et POIs.
+// S = référence, M = S×1.25, L = S×1.5.
 const MAP_SIZES = {
-  S:{ spawn:[600,  2100] },   // ×3
-  M:{ spawn:[450,  2250] },
-  L:{ spawn:[300,  2400] },
+  S:{ scale: 1.00, spawn:[200, 1600] },   // 1800
+  M:{ scale: 1.25, spawn:[225, 2025] },   // 2250
+  L:{ scale: 1.50, spawn:[270, 2430] },   // 2700
 };
 
 // ── Génération faune — procédurale terrain-aware ──────────────────────────
@@ -867,6 +878,16 @@ function createSimState(cfg={}) {
   const sizeCfg    = MAP_SIZES[cfg.mapSize||'M'];
   const biome      = cfg.biome||['forêt','désert','toundra','marais','montagne','volcan','jungle'][rng(0,6)];
   const mapSeed    = Date.now() % 999983;
+  // Scale appliqué selon mapSize : S=1.0, M=1.25, L=1.5
+  const scale      = sizeCfg.scale || 1.0;
+  _applyMapScale(scale);   // met à jour WORLD et ISLAND_EDGE globaux
+  const scaledPOIs = BASE_POIS.map(p => ({
+    ...p,
+    x: Math.round(p.x * scale),
+    y: Math.round(p.y * scale),
+    radius: Math.round(p.radius * scale),
+    _uses: 0, _depleted: false,
+  }));
 
   // Spawn équidistant sur le périmètre du carré [sMin, sMax]
   const [sMin, sMax] = sizeCfg.spawn;
@@ -899,9 +920,9 @@ function createSimState(cfg={}) {
     matchStats:{ totalCombats:0, totalCrafts:0, waterDeaths:0, alliancesFormed:0, betrayals:0 },
     map:{
       biome,
-      width:WORLD, height:WORLD,
+      width:mapW, height:mapW,    // mapW = WORLD × scale
       mapSeed,
-      pois:BASE_POIS.map(p=>({...p, _uses:0, _depleted:false})),
+      pois:scaledPOIs,
       loots:[],
       supplies:[], traps:[], corpses:[],
       fauna:    generateFauna(biome, mapSeed),
@@ -2233,16 +2254,21 @@ function tickSim(prev) {
     f.x = clamp(f.x, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     f.y = clamp(f.y, ISLAND_EDGE+5, WORLD-ISLAND_EDGE-5);
     // Animation : isMoving + direction 4-way isométrique
-    // Sprites animaux : row 0=SE, 1=SW, 2=NE, 3=NW (iso, vu de 3/4)
+    // Sprites animaux : row 0=SE, 1=SW, 2=NE, 3=NW (vu de 3/4 caméra)
+    // IMPORTANT : il faut projeter (dx, dy) MONDE en deltas SCREEN iso :
+    //   screenDx = dx - dy   (positif = vers la droite de l'écran)
+    //   screenDy = dx + dy   (positif = vers le bas de l'écran = vers caméra)
     const dx = f.x - prevX, dy = f.y - prevY;
     f.isMoving = Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5;
     if (f.isMoving) {
-      const goingRight = dx >= 0;        // E si dx>=0, W sinon
-      const goingDown  = dy >= 0;        // S (vers caméra) si dy>=0, N sinon
-      if      ( goingRight &&  goingDown) f.dirRow = 0;  // SE
-      else if (!goingRight &&  goingDown) f.dirRow = 1;  // SW
-      else if ( goingRight && !goingDown) f.dirRow = 2;  // NE
-      else                                f.dirRow = 3;  // NW
+      const screenDx = dx - dy;
+      const screenDy = dx + dy;
+      const isRight  = screenDx >= 0;     // direction visuelle E/W
+      const isDown   = screenDy >= 0;     // S (vers cam) ou N (loin)
+      if      ( isRight &&  isDown) f.dirRow = 0;  // SE — vers cam-droite
+      else if (!isRight &&  isDown) f.dirRow = 1;  // SW — vers cam-gauche
+      else if ( isRight && !isDown) f.dirRow = 2;  // NE — loin-droite
+      else                          f.dirRow = 3;  // NW — loin-gauche
     }
   });
 

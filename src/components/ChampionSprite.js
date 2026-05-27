@@ -61,7 +61,9 @@ export default function ChampionSprite({
   const rotIdxRef = useRef(0);
 
   // Drag horizontal : chaque PX_PER_TURN pixels → next direction
+  // .runOnJS(true) : callbacks sur thread JS pour pouvoir appeler setState
   const panGesture = Gesture.Pan()
+    .runOnJS(true)
     .onUpdate(e => {
       const turns = Math.round(e.translationX / PX_PER_TURN);
       const next = ((rotIdxRef.current + turns) % 4 + 4) % 4;

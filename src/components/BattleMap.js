@@ -18,8 +18,8 @@ const _CLIP_INTERSECT = 1;
 const TILE_W   = 24;   // largeur du losange (en px, zoom=1)
 const TILE_H   = 12;   // hauteur du losange
 const TILE_Z   = 8;    // pixels par unité d'élévation
-const HM_CELLS = 20;   // grille heightmap 20×20 (revert : était 60)
-const HM_CELL  = 5;    // unités monde par cellule (100/20 = 5)
+const HM_CELLS = 60;   // grille heightmap 60×60 (×3 — Vague 4)
+const HM_CELL  = 5;    // unités monde par cellule (300/60 = 5 — internal 0-300)
 
 // ── Palettes champion / supply ────────────────────────────────────────────
 const CHAMP_COLORS = [
@@ -119,22 +119,40 @@ function tileColors(biome, h) {
 
 // ── Génération procédurale de rivières sur la heightmap ───────────────────
 function addRivers(hm, biome, rng) {
-  const nb = biome === 'marais' ? 3 : biome === 'forêt' ? 2 : biome === 'montagne' ? 2 : biome === 'jungle' ? 4 : 1;
+  // [Vague 4] Toujours 1 ou 2 rivières, tracé h=0 (eau visible) sur tout le chemin
+  const nb = 1 + Math.floor(rng() * 2);
   for (let r = 0; r < nb; r++) {
-    // Départ sur un bord (h élevé)
-    let gx = Math.floor(2 + rng() * (HM_CELLS - 4));
-    let gy = Math.floor(2 + rng() * (HM_CELLS - 4));
-    for (let step = 0; step < HM_CELLS * 2; step++) {
+    // Départ aléatoire dans la moitié intérieure
+    let gx = Math.floor(4 + rng() * (HM_CELLS - 8));
+    let gy = Math.floor(4 + rng() * (HM_CELLS - 8));
+    // Direction initiale (vers un bord)
+    const dirToEdge = Math.floor(rng() * 4);
+    for (let step = 0; step < HM_CELLS * 3; step++) {
       gx = Math.max(1, Math.min(HM_CELLS - 2, gx));
       gy = Math.max(1, Math.min(HM_CELLS - 2, gy));
-      if (hm[gy][gx] > 0) hm[gy][gx] = Math.max(0, hm[gy][gx] - 1);
-      // Couler vers le voisin le plus bas
-      const nbrs = [[gx+1,gy],[gx-1,gy],[gx,gy+1],[gx,gy-1]].filter(([nx,ny])=>
-        nx>=1&&nx<HM_CELLS-1&&ny>=1&&ny<HM_CELLS-1);
-      const lowest = nbrs.sort((a,b)=>(hm[a[1]]?.[a[0]]??9)-(hm[b[1]]?.[b[0]]??9))[0];
-      if (!lowest) break;
-      [gx,gy] = lowest;
-      if (hm[gy][gx] === 0) break;
+      // Couler = mettre eau (h=0)
+      hm[gy][gx] = 0;
+      // Élargir parfois pour donner du volume au cours d'eau
+      if (rng() < 0.35) {
+        const ox = rng() < 0.5 ? 1 : -1;
+        const nx = gx + ox;
+        if (nx >= 1 && nx < HM_CELLS - 1) hm[gy][nx] = 0;
+      }
+      // Avancer : 65% chance vers le bord cible, 35% voisin random (méandre)
+      if (rng() < 0.65) {
+        if (dirToEdge === 0) gy--;
+        else if (dirToEdge === 1) gx++;
+        else if (dirToEdge === 2) gy++;
+        else gx--;
+      } else {
+        const dd = Math.floor(rng() * 4);
+        if (dd === 0) gy--;
+        else if (dd === 1) gx++;
+        else if (dd === 2) gy++;
+        else gx--;
+      }
+      // Stop si atteint un bord
+      if (gx <= 1 || gx >= HM_CELLS - 2 || gy <= 1 || gy >= HM_CELLS - 2) break;
     }
   }
 }
@@ -185,11 +203,12 @@ function clientHeightMap(biome, seed) {
         tw += w; th += p.h * w;
       });
       let elev = th / tw + (rng() - 0.5) * 0.9;
-      // Île : bords forcés en eau (h=0)
+      // [Vague 4] Cuvette : bord = eau, rim légèrement relevé, intérieur libre
       const edge = Math.min(gx, gy, HM_CELLS - 1 - gx, HM_CELLS - 1 - gy);
-      if (edge === 0) elev = 0;
-      else if (edge === 1) elev = Math.min(elev, 1);
-      else if (edge === 2) elev = Math.min(elev, 2);
+      if (edge === 0) elev = 0;                               // eau bord
+      else if (edge === 1) elev = Math.max(elev, 3);          // rim haut (paroi cuvette)
+      else if (edge === 2) elev = Math.max(elev, 2);          // descente vers rim
+      else if (edge === 3) elev = Math.max(elev, 1);          // léger talus
       hm[gy][gx] = Math.max(0, Math.min(7, Math.round(elev)));
     }
   }
@@ -248,9 +267,9 @@ function isoToScreen(ix, iy, camIx, camIy, zoom, W, H) {
 }
 
 // Centre iso de la map (pour camera par défaut)
-// Map interne 0-100 (HM_CELLS=20 × HM_CELL=5) → centre à 50
+// Map interne 0-300 (HM_CELLS=60 × HM_CELL=5) → centre à 150
 function mapCenterIso() {
-  const { ix, iy } = wToIso(50, 50, 1);
+  const { ix, iy } = wToIso(150, 150, 1);
   return { ix, iy: iy + 8 };
 }
 
@@ -462,16 +481,38 @@ const _CLIFF_L = [
   '#4862b8', // row10
 ];
 
+// [Vague 4] Vérifie si cette tile occlut un champion derrière (depuis la caméra)
+// Critère : tile haute (h≥2), champion à proximité dans une bande iso-arrière,
+// et différence d'élévation suffisante pour occluder visuellement.
+function _tileOcludesChamp(gx, gy, h, champs) {
+  if (!champs || h < 2) return false;
+  for (let i = 0; i < champs.length; i++) {
+    const cv = champs[i];
+    if (cv.isDead) continue;
+    const cgx = Math.floor(cv.x / HM_CELL);
+    const cgy = Math.floor(cv.y / HM_CELL);
+    // Champion vers le fond iso (cgy < gy) ET centre iso proche (abs dx <= 1)
+    if (cgy <= gy && cgy >= gy - 2 && Math.abs(cgx - gx) <= 1) {
+      // Tile assez haute pour cacher le perso
+      if (h >= (cv.elevation || 1) + 1) return true;
+    }
+  }
+  return false;
+}
+
 // ── Dessin d'un cube isométrique avec boucle d'empilement (Tile Stacking) ──
 // Optimisation FPS : au dézoom (zoom < 3) on dessine seulement la couche supérieure
 // → ~7× moins de drawImageRect sur tiles hautes (h=7). Les "sides" sont invisibles
 // à ce niveau de zoom de toute façon.
-function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg) {
+function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t, isoTilesImg, champsForOclusion) {
   const tw = (TILE_W / 2) * zoom;
   const th = (TILE_H / 2) * zoom;
   const tW = tw * 2;
   const tH = tW;
-  const dimA = fogA > 0.05 ? (1 - fogA * 0.78) : 1;
+  // [Vague 4] Transparence si occlut un perso
+  const occludes = _tileOcludesChamp(gx, gy, h, champsForOclusion);
+  const ocludeMult = occludes ? 0.40 : 1.0;
+  const dimA = (fogA > 0.05 ? (1 - fogA * 0.78) : 1) * ocludeMult;
 
   // LOD : zoom faible = couche du haut seulement. Zoom moyen = top + base.
   // Zoom fort = pile complète.
@@ -507,18 +548,7 @@ function drawIsoCube(canvas, gx, gy, h, biome, fogA, camIx, camIy, zoom, W, H, t
       canvas.drawPath(_tp, mkAlpha(topC, dimA));
     }
 
-    // Eau animée uniquement sur la couche de base
-    if (z === 0 && h === 0 && zoom > 0.8 && dimA > 0.15 && t != null) {
-      const r0 = _tileRng(gx, gy, 0);
-      for (let wi = 0; wi < 2; wi++) {
-        const phase = ((t * 0.65 + r0 * 2.5 + wi * 0.5) % 1.0);
-        const ringA = (1 - phase) * 0.18 * dimA;
-        if (ringA < 0.010) continue;
-        const rw = tw * (0.14 + phase * 0.60), rh = th * (0.14 + phase * 0.60);
-        _ep.rewind(); _ep.addOval(Skia.XYWHRect(tx - rw, ty - rh, rw * 2, rh * 2));
-        canvas.drawPath(_ep, mkStrokeA('#aad8f8', Math.max(0.4, zoom * 0.28), ringA));
-      }
-    }
+    // [Vague 4] Effet goutte d'eau sur rebords retiré (user request)
   }
 }
 
@@ -822,7 +852,8 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
   const _LPC_DIR_MAP = [2, 1, 3, 0];
   const lpcDirRow = _LPC_DIR_MAP[cv.dirRow ?? 0] ?? 2;
 
-  const spH = Math.max(18, zoom * (TILE_H / 2) * 2.6);
+  // [Vague 4] +40% taille perso (2.6 × 1.4 = 3.64) — taille d'une case
+  const spH = Math.max(25, zoom * (TILE_H / 2) * 3.64);
   const spW = spH;
   const spX = sx - spW / 2;
   const bob = isMoving ? Math.sin(t * 10 + cv.idx) * 0.8*sc
@@ -1015,7 +1046,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       fogA = dist > visionW ? Math.min(0.62, (dist - visionW) / visionSoft) : 0;
     }
 
-    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t, spriteImgs?.isoTiles);
+    drawIsoCube(canvas, tile.gx, tile.gy, tile.h, biome, fogA, camIx, camIy, zoom, W, H, t, spriteImgs?.isoTiles, v.champions);
   }
 
   // Champions restants (premier plan)
@@ -2351,49 +2382,20 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
       // [Vague 1] Mise à jour floating texts (age + auto-clean)
       updateFloatingTexts(gvisRef.current.floatingTexts, dtSec);
 
-      // Interpolation des champions (timestamp-based, style FFT : micro-stops par tile)
+      // [Vague 4] Interpolation simple avec easeOutQuad entre tile centers
+      // Comme la sim snap déjà sur centre de tile, pas besoin de micro-stops
       const now     = Date.now();
       const elapsed = now - lastTickRef.current;
       const alpha   = Math.min(1, elapsed / Math.max(500, tickDurRef.current));
-      // Easing easeOutQuad : 1 - (1-x)²
-      const _eo = x => 1 - (1 - x) * (1 - x);
-      // Tile size pour micro-stops : 100 / HM_CELLS = 5 unités internes
-      const TILE_INTERNAL = (100 / HM_CELLS);
+      const _eo     = x => 1 - (1 - x) * (1 - x);
+      const ea      = _eo(alpha);
 
       gvisRef.current.champions.forEach(cv => {
-        const distTotal = Math.hypot(cv.tx - cv.prevX, cv.ty - cv.prevY);
-        if (distTotal < TILE_INTERNAL * 0.85) {
-          // Petit déplacement (intra-tile) : easing simple
-          const ea = _eo(alpha);
-          cv.x = cv.prevX + (cv.tx - cv.prevX) * ea;
-          cv.y = cv.prevY + (cv.ty - cv.prevY) * ea;
-        } else {
-          // Déplacement multi-tile : découper en N steps avec pause finale 25%
-          const N = Math.max(1, Math.ceil(distTotal / TILE_INTERNAL));
-          const stepDur = 1.0 / N;
-          const stepIdx = Math.min(N - 1, Math.floor(alpha / stepDur));
-          const stepProg = (alpha - stepIdx * stepDur) / stepDur;  // 0..1
-          // Position step start/end
-          const fromT = stepIdx / N;
-          const toT   = (stepIdx + 1) / N;
-          const fromX = cv.prevX + (cv.tx - cv.prevX) * fromT;
-          const fromY = cv.prevY + (cv.ty - cv.prevY) * fromT;
-          const toX   = cv.prevX + (cv.tx - cv.prevX) * toT;
-          const toY   = cv.prevY + (cv.ty - cv.prevY) * toT;
-          // 0.75 walk eased + 0.25 pause (idle)
-          const walkProg = Math.min(1, stepProg / 0.75);
-          const lerp = _eo(walkProg);
-          cv.x = fromX + (toX - fromX) * lerp;
-          cv.y = fromY + (toY - fromY) * lerp;
-          // Pour les frames d'anim : si en pause, signaler isMoving=false brièvement
-          if (stepProg > 0.78) cv._microPause = true;
-          else                 cv._microPause = false;
-        }
+        cv.x = cv.prevX + (cv.tx - cv.prevX) * ea;
+        cv.y = cv.prevY + (cv.ty - cv.prevY) * ea;
         if (cv.combatFlash > 0) cv.combatFlash = Math.max(0, cv.combatFlash - dtSec);
       });
-      // Faune : easing simple (pas de micro-stops, ils ont leur propre mouvement)
       gvisRef.current.fauna?.forEach(fv => {
-        const ea = _eo(alpha);
         fv.x = fv.prevX + ((fv.tx ?? fv.x) - fv.prevX) * ea;
         fv.y = fv.prevY + ((fv.ty ?? fv.y) - fv.prevY) * ea;
       });
@@ -2447,12 +2449,12 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     const hm    = battleState.map?.heightMap
       || clientHeightMap(biome, battleState.id?.slice(0, 8) || 'default');
 
-    // Normalisation → espace monde interne 0-100 (HM_CELLS=20 × HM_CELL=5)
-    // backend = 100×100, simulateur = mapW×mapH → tout vient à 0-100 internes
+    // Normalisation → espace monde interne 0-300 (HM_CELLS=60 × HM_CELL=5)
+    // backend = 100×100, simulateur = mapW×mapH → tout vient à 0-300 internes
     const mapW = battleState.map?.width  || 100;
     const mapH = battleState.map?.height || 100;
-    const sX   = 100 / mapW;
-    const sY   = 100 / mapH;
+    const sX   = 300 / mapW;
+    const sY   = 300 / mapH;
 
     // Pre-compute sorted tiles (une seule fois par heightmap)
     const prevHm = gvisRef.current.heightMap;
@@ -2598,7 +2600,7 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
     const gx  = (ix / TW2 + iy / TH2) / 2;
     const gy  = (iy / TH2 - ix / TW2) / 2;
     // Internal 0-INTERNAL_MAX → world 0-mapW
-    const INTERNAL_MAX = HM_CELLS * HM_CELL;        // = 100 (HM_CELLS=20, HM_CELL=5)
+    const INTERNAL_MAX = HM_CELLS * HM_CELL;        // = 300 (HM_CELLS=60, HM_CELL=5)
     const mapW = battleState?.map?.width  || INTERNAL_MAX;
     const mapH = battleState?.map?.height || INTERNAL_MAX;
     const wxInternal = Math.max(0, Math.min(INTERNAL_MAX, gx * HM_CELL));

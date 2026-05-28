@@ -2188,12 +2188,23 @@ function tickSim(prev) {
       // Repos actif — campfire si la nuit
       if (isNight && c._activity.type==='idle') c._activity = {type:'campfire', startTick:state.tick};
     } else {
-      // [Vague 3] Cap diagonale : si dx ET dy non nuls, scale par 1/√2 (0.707)
-      // → vitesse perçue uniforme dans toutes les directions
-      const isDiag = (Math.abs(dx) > 0.01) && (Math.abs(dy) > 0.01);
-      const diagF  = isDiag ? 0.707 : 1.0;
-      c.x = clamp(c.x+dx*spd*diagF+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
-      c.y = clamp(c.y+dy*spd*diagF+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+      // [Vague 4] Mouvement strict case par case (JRPG)
+      // On limite à 1 tile par tick max et on snap au centre
+      const TILE = WORLD / 60;  // taille tile (HM_CELLS=60 côté visuel)
+      // Direction signée vers la cible (forcée à ±1 ou 0)
+      const stepX = dx > 0.1 ? 1 : dx < -0.1 ? -1 : 0;
+      const stepY = dy > 0.1 ? 1 : dy < -0.1 ? -1 : 0;
+      // Speed factor : sim speed se traduit en proba de bouger ce tick
+      // (sinon les persos voleraient à 1 tile/tick)
+      const moveProb = Math.min(1, (spd / 6));   // ajusté empiriquement
+      if (Math.random() < moveProb) {
+        // Avancer d'1 tile dans la direction
+        const tcx = Math.floor(c.x / TILE) + stepX;
+        const tcy = Math.floor(c.y / TILE) + stepY;
+        // Snap au centre de la tile cible
+        c.x = clamp(tcx * TILE + TILE/2, ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+        c.y = clamp(tcy * TILE + TILE/2, ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+      }
     }
   });
 

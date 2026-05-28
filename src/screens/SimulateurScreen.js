@@ -490,6 +490,15 @@ function simTerrainH(wx, wy, biome, seed) {
 const dist  = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
 const sign  = v => v>0?1:v<0?-1:0;
 const clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+// [Vague 3] Distance en "tiles" (Chebyshev). 2 entités sur la même tile = 0,
+// adjacentes (cardinal ou diagonal) = 1, etc.
+// Tile size dérive de WORLD courant : WORLD/20 = taille d'une cellule heightmap.
+function tileDist(a, b) {
+  const T = WORLD / 20;
+  return Math.max(Math.abs(Math.floor(a.x/T) - Math.floor(b.x/T)),
+                  Math.abs(Math.floor(a.y/T) - Math.floor(b.y/T)));
+}
+function tileAdj(a, b) { return tileDist(a, b) <= 1; }
 
 function timeOfDay(phase) {
   if (phase >= NIGHT_START)  return '🌙 Nuit';
@@ -2179,8 +2188,12 @@ function tickSim(prev) {
       // Repos actif — campfire si la nuit
       if (isNight && c._activity.type==='idle') c._activity = {type:'campfire', startTick:state.tick};
     } else {
-      c.x = clamp(c.x+dx*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
-      c.y = clamp(c.y+dy*spd+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+      // [Vague 3] Cap diagonale : si dx ET dy non nuls, scale par 1/√2 (0.707)
+      // → vitesse perçue uniforme dans toutes les directions
+      const isDiag = (Math.abs(dx) > 0.01) && (Math.abs(dy) > 0.01);
+      const diagF  = isDiag ? 0.707 : 1.0;
+      c.x = clamp(c.x+dx*spd*diagF+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
+      c.y = clamp(c.y+dy*spd*diagF+noise(1), ISLAND_EDGE, WORLD-ISLAND_EDGE-1);
     }
   });
 
@@ -2214,15 +2227,34 @@ function tickSim(prev) {
 
     const prevX = f.x, prevY = f.y;
     if (def.aggressive) {
-      // Loups/sangliers : attaquent si à portée
-      if (nearChamp && d < def.attackRange) {
+      // Loups/sangliers : attaquent si tile-adjacents (au lieu de attackRange brut)
+      if (nearChamp && tileAdj(nearChamp, f)) {
         const dmg = rng(Math.floor(def.dmg*0.6), def.dmg);
         nearChamp.hp -= dmg; nearChamp.simStats.dmgTaken += dmg;
         events.push({type:'narr',sub:'fauna_attack',id:nearChamp.id,name:nearChamp.name,tick:state.tick,
           text:`est attaqué(e) par un ${def.label} (−${dmg} PV) !`});
         if (nearChamp.hp <= 0) events.push({type:'death',champion:nearChamp.id,name:nearChamp.name,killedBy:'fauna',killedByName:def.label});
-        // Mouvement vers la proie
-        if (d > 3) { f.x+=sign(nearChamp.x-f.x)*def.speed*5; f.y+=sign(nearChamp.y-f.y)*def.speed*5; }
+        // [Vague 3] Champion riposte sur place (s'il est encore en vie)
+        if (nearChamp.hp > 0) {
+          const w = WEAPON_DEFS[nearChamp.weapon||'fists'];
+          const cdmg = rng(w.dmgMin, w.dmgMax);
+          f.hp -= cdmg;
+          nearChamp.simStats.dmgDealt = (nearChamp.simStats.dmgDealt||0) + cdmg;
+          if (f.hp <= 0) {
+            // Champion tue la fauna agressive en défense → moins de food, plus d'XP
+            f.hp = 0;
+            nearChamp.hunger = Math.min(100, (nearChamp.hunger??100) + def.food*0.5);
+            nearChamp.xp = (nearChamp.xp||0) + XP_PER_HUNT * 1.5;
+            checkLevelUp(nearChamp, state.tick, events);
+            events.push({type:'narr',sub:'fauna_kill',id:nearChamp.id,name:nearChamp.name,tick:state.tick,
+              text:`abat le ${def.label} qui l'attaquait (+${Math.round(def.food*0.5)} 🍗) !`});
+          } else {
+            events.push({type:'narr',sub:'fauna_combat',id:nearChamp.id,name:nearChamp.name,tick:state.tick,
+              text:`riposte au ${def.label} (−${cdmg} PV à la bête)`});
+          }
+        }
+        // Mouvement vers la proie (si fauna encore vivante)
+        if (f.hp > 0 && d > 3) { f.x+=sign(nearChamp.x-f.x)*def.speed*5; f.y+=sign(nearChamp.y-f.y)*def.speed*5; }
       } else if (nearChamp && d < 180) {
         f.x += sign(nearChamp.x-f.x)*def.speed*4+noise(3);
         f.y += sign(nearChamp.y-f.y)*def.speed*4+noise(3);
@@ -2273,15 +2305,15 @@ function tickSim(prev) {
   });
 
   // Chasse : champion à portée d'une proie non-aggressive → kill + nourriture
+  // [Vague 3] Portée = tile-adjacent (au lieu de meleeRange*2)
   aliveChamps.forEach(c=>{
     if (c.hp<=0) return;
     const eff = c._eff || c.stats;
-    const weapon = WEAPON_DEFS[c.weapon||'fists'];
     for (const f of aliveFauna) {
       if (f.hp<=0) continue;
       const def = FAUNA_DEFS[f.type];
       if (!def || def.aggressive) continue;
-      if (dist(f,c) > weapon.meleeRange * 2) continue;
+      if (!tileAdj(c, f)) continue;
       // Chance de chasse basée sur instinct
       // Chasse via DR instinct : inst=5→50%, inst=8→58%, inst=10→62%
       if (Math.random() > 0.3 + dr(eff.instinct||3)*0.04) continue;

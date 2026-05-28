@@ -293,12 +293,26 @@ function mkStrokeA(col,w,a) {
 }
 
 // ── Système de particules (coordonnées monde) ─────────────────────────────
+// Couleurs dust par biome (utilisées pour les pas)
+const _DUST_COLS = {
+  'forêt':    ['#5a4424','#705032','#80604c'],   // terre + feuilles
+  'désert':   ['#d4a865','#c89854','#b88848'],   // sable
+  'toundra':  ['#e8eaed','#d0d4d8','#b8c0c8'],   // neige
+  'marais':   ['#4a3a28','#5a4830','#3c2c1c'],   // boue
+  'montagne': ['#888888','#a8a8a8','#666666'],   // roche
+  'volcan':   ['#3a2828','#4a3030','#2a1818'],   // cendres
+  'jungle':   ['#4a5a28','#5a6a30','#3a4a18'],   // herbe humide
+};
 function spawnParticles(pool, wx, wy, type, color) {
   const cfgs = {
     combat: { n:6,  spd:[30,80],  lt:[0.35,0.65], r:[0.8,2.2], grav:20,  cols:[color,'#ff8844','#ffdd44'] },
     death:  { n:10, spd:[12,50],  lt:[0.7,1.6],   r:[0.7,2.8], grav:35,  cols:['#888','#555','#aaa','#ccc'] },
     heal:   { n:5,  spd:[5,18],   lt:[0.5,1.0],   r:[0.8,1.8], grav:-20, cols:['#2ecc71','#27ae60','#a8ffc8'] },
     supply: { n:4,  spd:[8,25],   lt:[0.5,1.1],   r:[1.0,2.5], grav:0,   cols:[color,'#ffffff','#e2b96f'] },
+    // Dust très discret : 1 particule, petite, fade rapide, peu de vélocité
+    // Pour ce type, "color" est interprété comme le nom de biome
+    dust:   { n:1,  spd:[3,8],    lt:[0.30,0.45], r:[0.5,1.1], grav:-4,
+              cols: _DUST_COLS[color] || _DUST_COLS['forêt'] },
   };
   const cfg = cfgs[type] || cfgs.combat;
   const n   = Math.min(cfg.n, 42 - pool.length);
@@ -1399,10 +1413,13 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       : Math.sin(t * 1.4 + (f.id?.charCodeAt(0) || 0)) * spHF * 0.015; // respiration douce idle
 
     if (spec && img) {
+      // [Vague 3] Ancrage au sol : pousse le sprite vers le bas de ~10% pour que
+      // les pieds touchent la tile (sinon padding bas → effet flottant)
+      const groundOff = spHF * 0.10;
       canvas.drawImageRect(
         img,
         Skia.XYWHRect(frameIdx * spec.sz, dirRow * spec.sz, spec.sz, spec.sz),
-        Skia.XYWHRect(fsx - spWF/2, fsy - spHF + bob, spWF, spHF),
+        Skia.XYWHRect(fsx - spWF/2, fsy - spHF + bob + groundOff, spWF, spHF),
         _getSpriteP(0.95)
       );
     } else {
@@ -2334,20 +2351,67 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
       // [Vague 1] Mise à jour floating texts (age + auto-clean)
       updateFloatingTexts(gvisRef.current.floatingTexts, dtSec);
 
-      // Interpolation linéaire des champions (timestamp-based)
+      // Interpolation des champions (timestamp-based, style FFT : micro-stops par tile)
       const now     = Date.now();
       const elapsed = now - lastTickRef.current;
       const alpha   = Math.min(1, elapsed / Math.max(500, tickDurRef.current));
+      // Easing easeOutQuad : 1 - (1-x)²
+      const _eo = x => 1 - (1 - x) * (1 - x);
+      // Tile size pour micro-stops : 100 / HM_CELLS = 5 unités internes
+      const TILE_INTERNAL = (100 / HM_CELLS);
+
       gvisRef.current.champions.forEach(cv => {
-        cv.x = cv.prevX + (cv.tx - cv.prevX) * alpha;
-        cv.y = cv.prevY + (cv.ty - cv.prevY) * alpha;
+        const distTotal = Math.hypot(cv.tx - cv.prevX, cv.ty - cv.prevY);
+        if (distTotal < TILE_INTERNAL * 0.85) {
+          // Petit déplacement (intra-tile) : easing simple
+          const ea = _eo(alpha);
+          cv.x = cv.prevX + (cv.tx - cv.prevX) * ea;
+          cv.y = cv.prevY + (cv.ty - cv.prevY) * ea;
+        } else {
+          // Déplacement multi-tile : découper en N steps avec pause finale 25%
+          const N = Math.max(1, Math.ceil(distTotal / TILE_INTERNAL));
+          const stepDur = 1.0 / N;
+          const stepIdx = Math.min(N - 1, Math.floor(alpha / stepDur));
+          const stepProg = (alpha - stepIdx * stepDur) / stepDur;  // 0..1
+          // Position step start/end
+          const fromT = stepIdx / N;
+          const toT   = (stepIdx + 1) / N;
+          const fromX = cv.prevX + (cv.tx - cv.prevX) * fromT;
+          const fromY = cv.prevY + (cv.ty - cv.prevY) * fromT;
+          const toX   = cv.prevX + (cv.tx - cv.prevX) * toT;
+          const toY   = cv.prevY + (cv.ty - cv.prevY) * toT;
+          // 0.75 walk eased + 0.25 pause (idle)
+          const walkProg = Math.min(1, stepProg / 0.75);
+          const lerp = _eo(walkProg);
+          cv.x = fromX + (toX - fromX) * lerp;
+          cv.y = fromY + (toY - fromY) * lerp;
+          // Pour les frames d'anim : si en pause, signaler isMoving=false brièvement
+          if (stepProg > 0.78) cv._microPause = true;
+          else                 cv._microPause = false;
+        }
         if (cv.combatFlash > 0) cv.combatFlash = Math.max(0, cv.combatFlash - dtSec);
       });
-      // Interpolation linéaire de la faune (même principe que les champions)
+      // Faune : easing simple (pas de micro-stops, ils ont leur propre mouvement)
       gvisRef.current.fauna?.forEach(fv => {
-        fv.x = fv.prevX + ((fv.tx ?? fv.x) - fv.prevX) * alpha;
-        fv.y = fv.prevY + ((fv.ty ?? fv.y) - fv.prevY) * alpha;
+        const ea = _eo(alpha);
+        fv.x = fv.prevX + ((fv.tx ?? fv.x) - fv.prevX) * ea;
+        fv.y = fv.prevY + ((fv.ty ?? fv.y) - fv.prevY) * ea;
       });
+
+      // [Vague 3] Dust particles aux pas (frame 2 et 5 de walk = footfalls)
+      // Très discret : seulement quand isMoving et avec proba
+      const _wt = timeRef.current * 9; // 9 fps walk
+      const _frame = Math.floor(_wt) % 9;
+      if (_frame === 2 || _frame === 5) {
+        const biomeName = gvisRef.current.biome || 'forêt';
+        gvisRef.current.champions.forEach(cv => {
+          if (!cv.isMoving || cv.isDead) return;
+          if (cv._microPause) return;       // pas de dust en pause
+          // Spawn rare : 25% de chance pour rester discret
+          if (Math.random() > 0.25) return;
+          spawnParticles(gvisRef.current.particles, cv.x, cv.y, 'dust', biomeName);
+        });
+      }
 
       // Rendu Skia — utilise la vraie hauteur canvas (pas la hauteur écran)
       const H = canvasHRef.current > 80 ? canvasHRef.current : SH;

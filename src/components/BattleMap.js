@@ -586,8 +586,131 @@ function _drawGeoFigure(canvas, cv, sc, sx, sy, baseA, t, col) {
   return { headR, headY, topY: headY - headR };
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+// ── Système visuel : status icons + activity vis + floating texts ─────────
+// ═════════════════════════════════════════════════════════════════════════
+
+// Icônes d'état au-dessus de la tête (empilées horizontalement)
+// Chaque entrée a une condition + un emoji + une couleur (le tinting via drawText
+// utilise déjà la couleur du paint).
+const _STATUS_ICONS = [
+  { test: cv => cv.hunger != null && cv.hunger < 30, ico: '🍗', col: '#ff8800' },
+  { test: cv => cv.thirst != null && cv.thirst < 30, ico: '💧', col: '#0099ff' },
+  { test: cv => (cv.se || []).includes('poison'),    ico: '☠',  col: '#88ff44' },
+  { test: cv => (cv.se || []).includes('bleed'),     ico: '🩸', col: '#ff3333' },
+  { test: cv => cv.fatigue != null && cv.fatigue > 70, ico: '💤', col: '#88aaff' },
+];
+function drawStatusIcons(canvas, cv, sx, topY, sc, baseA, fm) {
+  if (!fm) return;
+  const active = _STATUS_ICONS.filter(d => d.test(cv));
+  if (active.length === 0) return;
+  const spacing = 9 * sc;
+  const totalW  = active.length * spacing;
+  let x = sx - totalW / 2 + spacing / 2;
+  const y = topY - 4 * sc;
+  for (const def of active) {
+    canvas.drawText(def.ico, x - 4, y, mkAlpha(def.col, 0.95 * baseA), fm);
+    x += spacing;
+  }
+}
+
+// Mapping activity → visuel (outil emoji + couleur de progress + durée par défaut)
+const _ACTIVITY_VIS = {
+  crafting: { ico: '⚒', col: '#ff8c1a', dur: 40 },
+  foraging: { ico: '🍃', col: '#4ade80', dur: 20 },
+  campfire: { ico: '🔥', col: '#ff5722', dur: 60 },
+};
+function drawActivityVis(canvas, cv, sx, sy, sc, baseA, fm, currentTick) {
+  const act = cv._activity;
+  if (!act || act.type === 'idle' || !act.type) return;
+  const vis = _ACTIVITY_VIS[act.type];
+  if (!vis) return;
+  // Icône outil à droite du perso, au niveau des bras
+  if (fm) {
+    canvas.drawText(vis.ico, sx + 8 * sc, sy - 14 * sc,
+                    mkAlpha(vis.col, 0.95 * baseA), fm);
+  }
+  // Mini progress bar au-dessus de la tête
+  if (act.startTick != null && currentTick != null) {
+    const elapsed = currentTick - act.startTick;
+    const pct = Math.max(0, Math.min(1, elapsed / vis.dur));
+    const bw = 22 * sc, bh = 2.5 * sc;
+    const bx = sx - bw / 2;
+    const by = sy - 26 * sc;
+    canvas.drawRect(Skia.XYWHRect(bx, by, bw, bh), mkAlpha('#000000', 0.55 * baseA));
+    canvas.drawRect(Skia.XYWHRect(bx, by, bw * pct, bh), mkAlpha(vis.col, 0.95 * baseA));
+    // Petit cadre
+    canvas.drawRect(Skia.XYWHRect(bx, by, bw, bh),
+                    mkStrokeA(vis.col, 0.8 * sc, 0.7 * baseA));
+  }
+  // Campfire : petites particules flammes statiques sous le perso
+  if (act.type === 'campfire') {
+    const fx = sx, fy = sy + 2 * sc;
+    canvas.drawCircle(fx,        fy, 4*sc, mkAlpha('#ff5722', 0.65 * baseA));
+    canvas.drawCircle(fx - 2*sc, fy, 3*sc, mkAlpha('#ffa726', 0.55 * baseA));
+    canvas.drawCircle(fx + 2*sc, fy, 3*sc, mkAlpha('#ffa726', 0.55 * baseA));
+    canvas.drawCircle(fx,        fy - 1*sc, 2*sc, mkAlpha('#ffe082', 0.70 * baseA));
+  }
+}
+
+// Faisceau lumineux vertical sur un drop sponsor récent
+// age = nb de ticks depuis le drop (s._dropTick)
+function drawDropBeam(canvas, sx, sy, age, color) {
+  const MAX_AGE = 30;
+  if (age > MAX_AGE) return;
+  const fade = 1 - (age / MAX_AGE);
+  const baseW = 14;
+  const topW  = baseW * 0.35;
+  const topY  = sy - 60;
+  const path = Skia.Path.Make();
+  path.moveTo(sx - topW,  topY);
+  path.lineTo(sx + topW,  topY);
+  path.lineTo(sx + baseW, sy);
+  path.lineTo(sx - baseW, sy);
+  path.close();
+  canvas.drawPath(path, mkAlpha(color || '#ffe066', 0.22 * fade));
+  // Halo brillant au sol
+  canvas.drawCircle(sx, sy, baseW, mkAlpha(color || '#ffe066', 0.30 * fade));
+}
+
+// Floating texts (damage / heal numbers)
+// Stocké dans gvisRef.current.floatingTexts : [{ wx, wy, text, color, age, ttl }]
+function spawnFloatingText(arr, wx, wy, text, color, ttl = 1.0) {
+  if (!arr) return;
+  arr.push({ wx, wy, text: String(text), color: color || '#ffffff', age: 0, ttl });
+  // Capacity limit pour éviter accumulation
+  if (arr.length > 80) arr.splice(0, arr.length - 80);
+}
+function updateFloatingTexts(arr, dtSec) {
+  if (!arr) return;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    arr[i].age += dtSec;
+    if (arr[i].age >= arr[i].ttl) arr.splice(i, 1);
+  }
+}
+function drawFloatingTexts(canvas, arr, hm, camIx, camIy, zoom, W, H, fm) {
+  if (!fm || !arr || arr.length === 0) return;
+  for (const ft of arr) {
+    const z = hm ? getElev(ft.wx, ft.wy, hm) : 1;
+    const { ix, iy } = wToIso(ft.wx, ft.wy, z);
+    const sx = W/2 + (ix - camIx) * zoom;
+    const sy = H/2 + (iy - camIy) * zoom - 24 - ft.age * 38;  // float up
+    if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
+    const a = Math.max(0, 1 - ft.age / ft.ttl);
+    canvas.drawText(ft.text, sx - ft.text.length * 3, sy, mkAlpha(ft.color, a), fm);
+  }
+}
+
+// Critical hit flash : aura blanche brève autour du perso
+function drawCritFlash(canvas, sx, sy, sc, flash) {
+  if (!flash || flash <= 0) return;
+  const r = 12 * sc * (1 + (1 - flash) * 0.6);
+  canvas.drawCircle(sx, sy - 8*sc, r, mkAlpha('#ffffff', flash * 0.45));
+  canvas.drawCircle(sx, sy - 8*sc, r * 1.4, mkAlpha('#fff48a', flash * 0.22));
+}
+
 // ── Figurine isométrique (sprite ou géométrique) ─────────────────────────
-function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs) {
+function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs, currentTick) {
   const wz = getElev(cv.x, cv.y, hm);
   const { ix, iy } = wToIso(cv.x, cv.y, wz);
   const sx = W / 2 + (ix - camIx) * zoom;
@@ -804,6 +927,20 @@ function drawIsoCharacter(canvas, cv, hm, t, camIx, camIy, zoom, W, H, fm, sprit
     canvas.drawText(`▲${cv.elevation}`, sx + (headR||5*sc) + 2*sc, (topY||headY) + 4,
       mkAlpha('#f39c12', 0.78), fm);
   }
+
+  // ── [Vague 1+2] Visuels supplémentaires ──────────────────────────────────
+  // Critical flash (extension du combatFlash)
+  if (cv.combatFlash > 0.6) {
+    drawCritFlash(canvas, sx, sy, sc, cv.combatFlash);
+  }
+  // Status icons au-dessus de la HP bar
+  if (zoom > 0.7) {
+    drawStatusIcons(canvas, cv, sx, (topY !== undefined ? topY : headY - headR) - 12*sc, sc, baseA, fm);
+  }
+  // Visuels d'activité (outil, progress bar, particules feu)
+  if (zoom > 0.6) {
+    drawActivityVis(canvas, cv, sx, sy, sc, baseA, fm, currentTick);
+  }
 }
 
 // ── Scène isométrique principale ──────────────────────────────────────────
@@ -850,7 +987,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
     // Insérer les champions dont la profondeur est <= profondeur de ce tile
     while (ci < champsWithDepth.length && champsWithDepth[ci].depth <= tile.depth) {
-      drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs);
+      drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs, v.tick);
       ci++;
     }
 
@@ -869,7 +1006,7 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
 
   // Champions restants (premier plan)
   while (ci < champsWithDepth.length) {
-    drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs);
+    drawIsoCharacter(canvas, champsWithDepth[ci].cv, hm, t, camIx, camIy, zoom, W, H, fm, spriteImgs, v.tick);
     ci++;
   }
 
@@ -982,6 +1119,16 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
     if (sx2 < -40 || sx2 > W+40 || sy2 < -80 || sy2 > H+40) return;
     const col = WEAPON_COLORS[s.type] || SUPPLY_COLORS[s.type] || '#ffffff';
     const r2  = Math.max(3, zoom * 1.8);
+
+    // [Vague 1] Faisceau lumineux vertical pour drops sponsor récents
+    // (visible jusqu'à ~30 ticks après le drop, fade progressif)
+    if (isSupply && !falling && tickDiff < 30) {
+      // Position sol pour le beam
+      const { ix: bix, iy: biy } = wToIso(s.x, s.y, sh + 0.3);
+      const bsx = W / 2 + (bix - camIx) * zoom;
+      const bsy = H / 2 + (biy - camIy) * zoom;
+      drawDropBeam(canvas, bsx, bsy, tickDiff, col);
+    }
 
     // Ombre portée au sol (s'agrandit pendant la chute)
     if (falling && fallH > sh + 0.5) {
@@ -1420,6 +1567,10 @@ function drawIsoScene(canvas, t, v, sortedTilesRef, camIx, camIy, zoom, fm, fs, 
       canvas.drawRect(Skia.XYWHRect(0, sy2, W, 3), mkAlpha('#ffaa44', 0.04+Math.sin(t*2+sh)*0.02));
     }
   }
+
+  // [Vague 1] Floating texts (damage / heal numbers) — par-dessus tout le monde
+  // sauf le HUD pour rester lisibles
+  drawFloatingTexts(canvas, v.floatingTexts, hm, camIx, camIy, zoom, W, H, fm);
 
   // ── HUD ───────────────────────────────────────────────────────────────────
   if (fm) {
@@ -2180,6 +2331,8 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
         p.life -= p.decay * dtSec;
         return p.life > 0;
       });
+      // [Vague 1] Mise à jour floating texts (age + auto-clean)
+      updateFloatingTexts(gvisRef.current.floatingTexts, dtSec);
 
       // Interpolation linéaire des champions (timestamp-based)
       const now     = Date.now();
@@ -2271,8 +2424,12 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
         prevX: ex ? ex.x : tx, prevY: ex ? ex.y : ty,
         tx, ty,
         hp: c.hp, maxHp: c.maxHp,
+        prevHpRaw: ex ? ex.hpRaw : c.hp,         // pour détection delta dmg/heal
+        hpRaw: c.hp,                              // hp brut (non interpolé) source de vérité
         hunger: c.hunger != null ? c.hunger : null,
         thirst: c.thirst != null ? c.thirst : null,
+        fatigue: c.fatigue != null ? c.fatigue : null,
+        _activity: c._activity || { type: 'idle' },
         color: c.color || CHAMP_COLORS[i % CHAMP_COLORS.length],
         isDead: c.hp <= 0,
         combatFlash: ex ? ex.combatFlash : 0,
@@ -2293,10 +2450,21 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
 
     // Spawns particules
     const spawns = [];
+    // [Vague 1] Floating texts (damage/heal numbers) — accumulés par tick
+    const newFloats = [];
     champs.forEach(cv => {
       const ex2 = prevMap.get(cv.id);
       if (ex2 && !ex2.isDead && cv.isDead)
         spawns.push({ wx: cv.tx, wy: cv.ty, type: 'death', color: cv.color });
+      // Détection delta HP : dégâts (rouge) ou soin (vert)
+      if (ex2 && !cv.isDead && cv.hpRaw != null && ex2.hpRaw != null) {
+        const delta = cv.hpRaw - ex2.hpRaw;
+        if (delta <= -1) {
+          newFloats.push({ wx: cv.tx, wy: cv.ty, text: `${Math.round(delta)}`, color: '#ff3344', age: 0, ttl: 1.1 });
+        } else if (delta >= 1) {
+          newFloats.push({ wx: cv.tx, wy: cv.ty, text: `+${Math.round(delta)}`, color: '#22ee44', age: 0, ttl: 1.1 });
+        }
+      }
     });
     (battleState.events || []).slice(-20).forEach(ev => {
       if (ev.type === 'combat') [ev.a, ev.b].forEach(id => {
@@ -2320,6 +2488,8 @@ export default function BattleMap({ battleState, onChampionTap, dropMode, onDrop
       heightMap:     hm,
       followId:      gvisRef.current.followId,
       particles:     gvisRef.current.particles || [],
+      // [Vague 1] floatingTexts persistent entre ticks, fade au fil du temps
+      floatingTexts: [...(gvisRef.current.floatingTexts || []), ...newFloats],
       pendingSpawns: spawns,
       fauna:         (() => {
         const prevFM = new Map((gvisRef.current.fauna || []).map(pf => [pf.id, pf]));

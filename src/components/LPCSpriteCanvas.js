@@ -45,13 +45,28 @@ function generateLook(id) {
 }
 
 // ── Mapping animState → LPC anim ─────────────────────────────────────────
+// Counts d'origine LPC :
+//   idle=2, walk=9, run=8, slash=6, backslash=13, halfslash=7, hurt=6,
+//   shoot=13, thrust=8, spellcast=7, jump=5, climb=6, sit=3, combat_idle=2, emote=variable
 const ANIM_MAP = {
-  idle:   { lpc:'idle',  fps:2,  frames:2 },
-  walk:   { lpc:'walk',  fps:9,  frames:9 },
-  run:    { lpc:'walk',  fps:13, frames:9 },
-  attack: { lpc:'slash', fps:12, frames:6 },
-  hurt:   { lpc:'hurt',  fps:6,  frames:6 },
-  death:  { lpc:'hurt',  fps:0,  frames:1 },
+  idle:        { lpc:'idle',        fps:2,  frames:2 },
+  walk:        { lpc:'walk',        fps:9,  frames:9 },
+  run:         { lpc:'run',         fps:11, frames:8 },
+  attack:      { lpc:'slash',       fps:12, frames:6 },
+  slash:       { lpc:'slash',       fps:12, frames:6 },
+  backslash:   { lpc:'backslash',   fps:14, frames:13 },
+  halfslash:   { lpc:'halfslash',   fps:14, frames:7 },
+  thrust:      { lpc:'thrust',      fps:11, frames:8 },
+  shoot:       { lpc:'shoot',       fps:13, frames:13 },
+  spellcast:   { lpc:'spellcast',   fps:10, frames:7 },
+  cast:        { lpc:'spellcast',   fps:10, frames:7 },   // alias
+  jump:        { lpc:'jump',        fps:8,  frames:5 },
+  climb:       { lpc:'climb',       fps:7,  frames:6 },
+  sit:         { lpc:'sit',         fps:0,  frames:3 },
+  combat_idle: { lpc:'combat_idle', fps:3,  frames:2 },
+  emote:       { lpc:'emote',       fps:6,  frames:8 },
+  hurt:        { lpc:'hurt',        fps:6,  frames:6 },
+  death:       { lpc:'hurt',        fps:0,  frames:1 },
 };
 
 // ── Peinture sprite (alpha uniquement) ───────────────────────────────────
@@ -159,6 +174,178 @@ export default function LPCSpriteCanvas({
   const imgFeetBootsIdle     = useImage(require('../../assets/sprites/lpc/feet/boots_idle.png'));
   const imgFeetBootsSlash    = useImage(require('../../assets/sprites/lpc/feet/boots_slash.png'));
   const imgFeetBootsHurt     = useImage(require('../../assets/sprites/lpc/feet/boots_hurt.png'));
+  const imgBodyMaleBackslash = useImage(require('../../assets/sprites/lpc/body/male_backslash.png'));
+  const imgBodyMaleClimb = useImage(require('../../assets/sprites/lpc/body/male_climb.png'));
+  const imgBodyMaleCombatidle = useImage(require('../../assets/sprites/lpc/body/male_combat_idle.png'));
+  const imgBodyMaleEmote = useImage(require('../../assets/sprites/lpc/body/male_emote.png'));
+  const imgBodyMaleHalfslash = useImage(require('../../assets/sprites/lpc/body/male_halfslash.png'));
+  const imgBodyMaleJump = useImage(require('../../assets/sprites/lpc/body/male_jump.png'));
+  const imgBodyMaleRun = useImage(require('../../assets/sprites/lpc/body/male_run.png'));
+  const imgBodyMaleShoot = useImage(require('../../assets/sprites/lpc/body/male_shoot.png'));
+  const imgBodyMaleSit = useImage(require('../../assets/sprites/lpc/body/male_sit.png'));
+  const imgBodyMaleSpellcast = useImage(require('../../assets/sprites/lpc/body/male_spellcast.png'));
+  const imgBodyMaleThrust = useImage(require('../../assets/sprites/lpc/body/male_thrust.png'));
+  const imgBodyFemaleBackslash = useImage(require('../../assets/sprites/lpc/body/female_backslash.png'));
+  const imgBodyFemaleClimb = useImage(require('../../assets/sprites/lpc/body/female_climb.png'));
+  const imgBodyFemaleCombatidle = useImage(require('../../assets/sprites/lpc/body/female_combat_idle.png'));
+  const imgBodyFemaleEmote = useImage(require('../../assets/sprites/lpc/body/female_emote.png'));
+  const imgBodyFemaleHalfslash = useImage(require('../../assets/sprites/lpc/body/female_halfslash.png'));
+  const imgBodyFemaleJump = useImage(require('../../assets/sprites/lpc/body/female_jump.png'));
+  const imgBodyFemaleRun = useImage(require('../../assets/sprites/lpc/body/female_run.png'));
+  const imgBodyFemaleShoot = useImage(require('../../assets/sprites/lpc/body/female_shoot.png'));
+  const imgBodyFemaleSit = useImage(require('../../assets/sprites/lpc/body/female_sit.png'));
+  const imgBodyFemaleSpellcast = useImage(require('../../assets/sprites/lpc/body/female_spellcast.png'));
+  const imgBodyFemaleThrust = useImage(require('../../assets/sprites/lpc/body/female_thrust.png'));
+  const imgHairBobBackslash = useImage(require('../../assets/sprites/lpc/hair/bob_backslash.png'));
+  const imgHairBobClimb = useImage(require('../../assets/sprites/lpc/hair/bob_climb.png'));
+  const imgHairBobCombatidle = useImage(require('../../assets/sprites/lpc/hair/bob_combat_idle.png'));
+  const imgHairBobEmote = useImage(require('../../assets/sprites/lpc/hair/bob_emote.png'));
+  const imgHairBobHalfslash = useImage(require('../../assets/sprites/lpc/hair/bob_halfslash.png'));
+  const imgHairBobJump = useImage(require('../../assets/sprites/lpc/hair/bob_jump.png'));
+  const imgHairBobRun = useImage(require('../../assets/sprites/lpc/hair/bob_run.png'));
+  const imgHairBobShoot = useImage(require('../../assets/sprites/lpc/hair/bob_shoot.png'));
+  const imgHairBobSit = useImage(require('../../assets/sprites/lpc/hair/bob_sit.png'));
+  const imgHairBobSpellcast = useImage(require('../../assets/sprites/lpc/hair/bob_spellcast.png'));
+  const imgHairBobThrust = useImage(require('../../assets/sprites/lpc/hair/bob_thrust.png'));
+  const imgHairBraidBackslash = useImage(require('../../assets/sprites/lpc/hair/braid_backslash.png'));
+  const imgHairBraidClimb = useImage(require('../../assets/sprites/lpc/hair/braid_climb.png'));
+  const imgHairBraidCombatidle = useImage(require('../../assets/sprites/lpc/hair/braid_combat_idle.png'));
+  const imgHairBraidEmote = useImage(require('../../assets/sprites/lpc/hair/braid_emote.png'));
+  const imgHairBraidHalfslash = useImage(require('../../assets/sprites/lpc/hair/braid_halfslash.png'));
+  const imgHairBraidJump = useImage(require('../../assets/sprites/lpc/hair/braid_jump.png'));
+  const imgHairBraidRun = useImage(require('../../assets/sprites/lpc/hair/braid_run.png'));
+  const imgHairBraidShoot = useImage(require('../../assets/sprites/lpc/hair/braid_shoot.png'));
+  const imgHairBraidSit = useImage(require('../../assets/sprites/lpc/hair/braid_sit.png'));
+  const imgHairBraidSpellcast = useImage(require('../../assets/sprites/lpc/hair/braid_spellcast.png'));
+  const imgHairBraidThrust = useImage(require('../../assets/sprites/lpc/hair/braid_thrust.png'));
+  const imgHairBangsBackslash = useImage(require('../../assets/sprites/lpc/hair/bangs_backslash.png'));
+  const imgHairBangsClimb = useImage(require('../../assets/sprites/lpc/hair/bangs_climb.png'));
+  const imgHairBangsCombatidle = useImage(require('../../assets/sprites/lpc/hair/bangs_combat_idle.png'));
+  const imgHairBangsEmote = useImage(require('../../assets/sprites/lpc/hair/bangs_emote.png'));
+  const imgHairBangsHalfslash = useImage(require('../../assets/sprites/lpc/hair/bangs_halfslash.png'));
+  const imgHairBangsJump = useImage(require('../../assets/sprites/lpc/hair/bangs_jump.png'));
+  const imgHairBangsRun = useImage(require('../../assets/sprites/lpc/hair/bangs_run.png'));
+  const imgHairBangsShoot = useImage(require('../../assets/sprites/lpc/hair/bangs_shoot.png'));
+  const imgHairBangsSit = useImage(require('../../assets/sprites/lpc/hair/bangs_sit.png'));
+  const imgHairBangsSpellcast = useImage(require('../../assets/sprites/lpc/hair/bangs_spellcast.png'));
+  const imgHairBangsThrust = useImage(require('../../assets/sprites/lpc/hair/bangs_thrust.png'));
+  const imgHairAfroBackslash = useImage(require('../../assets/sprites/lpc/hair/afro_backslash.png'));
+  const imgHairAfroClimb = useImage(require('../../assets/sprites/lpc/hair/afro_climb.png'));
+  const imgHairAfroCombatidle = useImage(require('../../assets/sprites/lpc/hair/afro_combat_idle.png'));
+  const imgHairAfroEmote = useImage(require('../../assets/sprites/lpc/hair/afro_emote.png'));
+  const imgHairAfroHalfslash = useImage(require('../../assets/sprites/lpc/hair/afro_halfslash.png'));
+  const imgHairAfroJump = useImage(require('../../assets/sprites/lpc/hair/afro_jump.png'));
+  const imgHairAfroRun = useImage(require('../../assets/sprites/lpc/hair/afro_run.png'));
+  const imgHairAfroShoot = useImage(require('../../assets/sprites/lpc/hair/afro_shoot.png'));
+  const imgHairAfroSit = useImage(require('../../assets/sprites/lpc/hair/afro_sit.png'));
+  const imgHairAfroSpellcast = useImage(require('../../assets/sprites/lpc/hair/afro_spellcast.png'));
+  const imgHairAfroThrust = useImage(require('../../assets/sprites/lpc/hair/afro_thrust.png'));
+  const imgHairBuzzcutBackslash = useImage(require('../../assets/sprites/lpc/hair/buzzcut_backslash.png'));
+  const imgHairBuzzcutClimb = useImage(require('../../assets/sprites/lpc/hair/buzzcut_climb.png'));
+  const imgHairBuzzcutCombatidle = useImage(require('../../assets/sprites/lpc/hair/buzzcut_combat_idle.png'));
+  const imgHairBuzzcutEmote = useImage(require('../../assets/sprites/lpc/hair/buzzcut_emote.png'));
+  const imgHairBuzzcutHalfslash = useImage(require('../../assets/sprites/lpc/hair/buzzcut_halfslash.png'));
+  const imgHairBuzzcutJump = useImage(require('../../assets/sprites/lpc/hair/buzzcut_jump.png'));
+  const imgHairBuzzcutRun = useImage(require('../../assets/sprites/lpc/hair/buzzcut_run.png'));
+  const imgHairBuzzcutShoot = useImage(require('../../assets/sprites/lpc/hair/buzzcut_shoot.png'));
+  const imgHairBuzzcutSit = useImage(require('../../assets/sprites/lpc/hair/buzzcut_sit.png'));
+  const imgHairBuzzcutSpellcast = useImage(require('../../assets/sprites/lpc/hair/buzzcut_spellcast.png'));
+  const imgHairBuzzcutThrust = useImage(require('../../assets/sprites/lpc/hair/buzzcut_thrust.png'));
+  const imgHairCornrowsBackslash = useImage(require('../../assets/sprites/lpc/hair/cornrows_backslash.png'));
+  const imgHairCornrowsClimb = useImage(require('../../assets/sprites/lpc/hair/cornrows_climb.png'));
+  const imgHairCornrowsCombatidle = useImage(require('../../assets/sprites/lpc/hair/cornrows_combat_idle.png'));
+  const imgHairCornrowsEmote = useImage(require('../../assets/sprites/lpc/hair/cornrows_emote.png'));
+  const imgHairCornrowsHalfslash = useImage(require('../../assets/sprites/lpc/hair/cornrows_halfslash.png'));
+  const imgHairCornrowsJump = useImage(require('../../assets/sprites/lpc/hair/cornrows_jump.png'));
+  const imgHairCornrowsRun = useImage(require('../../assets/sprites/lpc/hair/cornrows_run.png'));
+  const imgHairCornrowsShoot = useImage(require('../../assets/sprites/lpc/hair/cornrows_shoot.png'));
+  const imgHairCornrowsSit = useImage(require('../../assets/sprites/lpc/hair/cornrows_sit.png'));
+  const imgHairCornrowsSpellcast = useImage(require('../../assets/sprites/lpc/hair/cornrows_spellcast.png'));
+  const imgHairCornrowsThrust = useImage(require('../../assets/sprites/lpc/hair/cornrows_thrust.png'));
+  const imgHairCurlyBackslash = useImage(require('../../assets/sprites/lpc/hair/curly_backslash.png'));
+  const imgHairCurlyClimb = useImage(require('../../assets/sprites/lpc/hair/curly_climb.png'));
+  const imgHairCurlyCombatidle = useImage(require('../../assets/sprites/lpc/hair/curly_combat_idle.png'));
+  const imgHairCurlyEmote = useImage(require('../../assets/sprites/lpc/hair/curly_emote.png'));
+  const imgHairCurlyHalfslash = useImage(require('../../assets/sprites/lpc/hair/curly_halfslash.png'));
+  const imgHairCurlyJump = useImage(require('../../assets/sprites/lpc/hair/curly_jump.png'));
+  const imgHairCurlyRun = useImage(require('../../assets/sprites/lpc/hair/curly_run.png'));
+  const imgHairCurlyShoot = useImage(require('../../assets/sprites/lpc/hair/curly_shoot.png'));
+  const imgHairCurlySit = useImage(require('../../assets/sprites/lpc/hair/curly_sit.png'));
+  const imgHairCurlySpellcast = useImage(require('../../assets/sprites/lpc/hair/curly_spellcast.png'));
+  const imgHairCurlyThrust = useImage(require('../../assets/sprites/lpc/hair/curly_thrust.png'));
+  const imgHairLongBackslash = useImage(require('../../assets/sprites/lpc/hair/long_backslash.png'));
+  const imgHairLongClimb = useImage(require('../../assets/sprites/lpc/hair/long_climb.png'));
+  const imgHairLongCombatidle = useImage(require('../../assets/sprites/lpc/hair/long_combat_idle.png'));
+  const imgHairLongEmote = useImage(require('../../assets/sprites/lpc/hair/long_emote.png'));
+  const imgHairLongHalfslash = useImage(require('../../assets/sprites/lpc/hair/long_halfslash.png'));
+  const imgHairLongJump = useImage(require('../../assets/sprites/lpc/hair/long_jump.png'));
+  const imgHairLongRun = useImage(require('../../assets/sprites/lpc/hair/long_run.png'));
+  const imgHairLongShoot = useImage(require('../../assets/sprites/lpc/hair/long_shoot.png'));
+  const imgHairLongSit = useImage(require('../../assets/sprites/lpc/hair/long_sit.png'));
+  const imgHairLongSpellcast = useImage(require('../../assets/sprites/lpc/hair/long_spellcast.png'));
+  const imgHairLongThrust = useImage(require('../../assets/sprites/lpc/hair/long_thrust.png'));
+  const imgTorsoTshirtBackslash = useImage(require('../../assets/sprites/lpc/torso/tshirt_backslash.png'));
+  const imgTorsoTshirtClimb = useImage(require('../../assets/sprites/lpc/torso/tshirt_climb.png'));
+  const imgTorsoTshirtCombatidle = useImage(require('../../assets/sprites/lpc/torso/tshirt_combat_idle.png'));
+  const imgTorsoTshirtEmote = useImage(require('../../assets/sprites/lpc/torso/tshirt_emote.png'));
+  const imgTorsoTshirtHalfslash = useImage(require('../../assets/sprites/lpc/torso/tshirt_halfslash.png'));
+  const imgTorsoTshirtJump = useImage(require('../../assets/sprites/lpc/torso/tshirt_jump.png'));
+  const imgTorsoTshirtRun = useImage(require('../../assets/sprites/lpc/torso/tshirt_run.png'));
+  const imgTorsoTshirtShoot = useImage(require('../../assets/sprites/lpc/torso/tshirt_shoot.png'));
+  const imgTorsoTshirtSit = useImage(require('../../assets/sprites/lpc/torso/tshirt_sit.png'));
+  const imgTorsoTshirtSpellcast = useImage(require('../../assets/sprites/lpc/torso/tshirt_spellcast.png'));
+  const imgTorsoTshirtThrust = useImage(require('../../assets/sprites/lpc/torso/tshirt_thrust.png'));
+  const imgTorsoLeatherClimb = useImage(require('../../assets/sprites/lpc/torso/leather_climb.png'));
+  const imgTorsoLeatherEmote = useImage(require('../../assets/sprites/lpc/torso/leather_emote.png'));
+  const imgTorsoLeatherJump = useImage(require('../../assets/sprites/lpc/torso/leather_jump.png'));
+  const imgTorsoLeatherShoot = useImage(require('../../assets/sprites/lpc/torso/leather_shoot.png'));
+  const imgTorsoLeatherSit = useImage(require('../../assets/sprites/lpc/torso/leather_sit.png'));
+  const imgTorsoLeatherSpellcast = useImage(require('../../assets/sprites/lpc/torso/leather_spellcast.png'));
+  const imgTorsoLeatherThrust = useImage(require('../../assets/sprites/lpc/torso/leather_thrust.png'));
+  const imgTorsoPlateBackslash = useImage(require('../../assets/sprites/lpc/torso/plate_backslash.png'));
+  const imgTorsoPlateClimb = useImage(require('../../assets/sprites/lpc/torso/plate_climb.png'));
+  const imgTorsoPlateCombatidle = useImage(require('../../assets/sprites/lpc/torso/plate_combat_idle.png'));
+  const imgTorsoPlateEmote = useImage(require('../../assets/sprites/lpc/torso/plate_emote.png'));
+  const imgTorsoPlateHalfslash = useImage(require('../../assets/sprites/lpc/torso/plate_halfslash.png'));
+  const imgTorsoPlateJump = useImage(require('../../assets/sprites/lpc/torso/plate_jump.png'));
+  const imgTorsoPlateRun = useImage(require('../../assets/sprites/lpc/torso/plate_run.png'));
+  const imgTorsoPlateShoot = useImage(require('../../assets/sprites/lpc/torso/plate_shoot.png'));
+  const imgTorsoPlateSit = useImage(require('../../assets/sprites/lpc/torso/plate_sit.png'));
+  const imgTorsoPlateSpellcast = useImage(require('../../assets/sprites/lpc/torso/plate_spellcast.png'));
+  const imgTorsoPlateThrust = useImage(require('../../assets/sprites/lpc/torso/plate_thrust.png'));
+  const imgLegsPantsBackslash = useImage(require('../../assets/sprites/lpc/legs/pants_backslash.png'));
+  const imgLegsPantsClimb = useImage(require('../../assets/sprites/lpc/legs/pants_climb.png'));
+  const imgLegsPantsCombatidle = useImage(require('../../assets/sprites/lpc/legs/pants_combat_idle.png'));
+  const imgLegsPantsEmote = useImage(require('../../assets/sprites/lpc/legs/pants_emote.png'));
+  const imgLegsPantsHalfslash = useImage(require('../../assets/sprites/lpc/legs/pants_halfslash.png'));
+  const imgLegsPantsJump = useImage(require('../../assets/sprites/lpc/legs/pants_jump.png'));
+  const imgLegsPantsRun = useImage(require('../../assets/sprites/lpc/legs/pants_run.png'));
+  const imgLegsPantsShoot = useImage(require('../../assets/sprites/lpc/legs/pants_shoot.png'));
+  const imgLegsPantsSit = useImage(require('../../assets/sprites/lpc/legs/pants_sit.png'));
+  const imgLegsPantsSpellcast = useImage(require('../../assets/sprites/lpc/legs/pants_spellcast.png'));
+  const imgLegsPantsThrust = useImage(require('../../assets/sprites/lpc/legs/pants_thrust.png'));
+  const imgLegsShortsBackslash = useImage(require('../../assets/sprites/lpc/legs/shorts_backslash.png'));
+  const imgLegsShortsClimb = useImage(require('../../assets/sprites/lpc/legs/shorts_climb.png'));
+  const imgLegsShortsCombatidle = useImage(require('../../assets/sprites/lpc/legs/shorts_combat_idle.png'));
+  const imgLegsShortsEmote = useImage(require('../../assets/sprites/lpc/legs/shorts_emote.png'));
+  const imgLegsShortsHalfslash = useImage(require('../../assets/sprites/lpc/legs/shorts_halfslash.png'));
+  const imgLegsShortsJump = useImage(require('../../assets/sprites/lpc/legs/shorts_jump.png'));
+  const imgLegsShortsRun = useImage(require('../../assets/sprites/lpc/legs/shorts_run.png'));
+  const imgLegsShortsShoot = useImage(require('../../assets/sprites/lpc/legs/shorts_shoot.png'));
+  const imgLegsShortsSit = useImage(require('../../assets/sprites/lpc/legs/shorts_sit.png'));
+  const imgLegsShortsSpellcast = useImage(require('../../assets/sprites/lpc/legs/shorts_spellcast.png'));
+  const imgLegsShortsThrust = useImage(require('../../assets/sprites/lpc/legs/shorts_thrust.png'));
+  const imgFeetBootsBackslash = useImage(require('../../assets/sprites/lpc/feet/boots_backslash.png'));
+  const imgFeetBootsClimb = useImage(require('../../assets/sprites/lpc/feet/boots_climb.png'));
+  const imgFeetBootsCombatidle = useImage(require('../../assets/sprites/lpc/feet/boots_combat_idle.png'));
+  const imgFeetBootsEmote = useImage(require('../../assets/sprites/lpc/feet/boots_emote.png'));
+  const imgFeetBootsHalfslash = useImage(require('../../assets/sprites/lpc/feet/boots_halfslash.png'));
+  const imgFeetBootsJump = useImage(require('../../assets/sprites/lpc/feet/boots_jump.png'));
+  const imgFeetBootsRun = useImage(require('../../assets/sprites/lpc/feet/boots_run.png'));
+  const imgFeetBootsShoot = useImage(require('../../assets/sprites/lpc/feet/boots_shoot.png'));
+  const imgFeetBootsSit = useImage(require('../../assets/sprites/lpc/feet/boots_sit.png'));
+  const imgFeetBootsSpellcast = useImage(require('../../assets/sprites/lpc/feet/boots_spellcast.png'));
+  const imgFeetBootsThrust = useImage(require('../../assets/sprites/lpc/feet/boots_thrust.png'));
 
   // ── Table de lookup des images chargées ──────────────────────────────
   const imgsRef = useRef({});
@@ -237,6 +424,178 @@ export default function LPCSpriteCanvas({
     if (imgFeetBootsIdle)    c['feet_boots_idle']     = imgFeetBootsIdle;
     if (imgFeetBootsSlash)   c['feet_boots_slash']    = imgFeetBootsSlash;
     if (imgFeetBootsHurt)    c['feet_boots_hurt']     = imgFeetBootsHurt;
+    if (imgBodyMaleBackslash) c['body_male_backslash'] = imgBodyMaleBackslash;
+    if (imgBodyMaleClimb) c['body_male_climb'] = imgBodyMaleClimb;
+    if (imgBodyMaleCombatidle) c['body_male_combat_idle'] = imgBodyMaleCombatidle;
+    if (imgBodyMaleEmote) c['body_male_emote'] = imgBodyMaleEmote;
+    if (imgBodyMaleHalfslash) c['body_male_halfslash'] = imgBodyMaleHalfslash;
+    if (imgBodyMaleJump) c['body_male_jump'] = imgBodyMaleJump;
+    if (imgBodyMaleRun) c['body_male_run'] = imgBodyMaleRun;
+    if (imgBodyMaleShoot) c['body_male_shoot'] = imgBodyMaleShoot;
+    if (imgBodyMaleSit) c['body_male_sit'] = imgBodyMaleSit;
+    if (imgBodyMaleSpellcast) c['body_male_spellcast'] = imgBodyMaleSpellcast;
+    if (imgBodyMaleThrust) c['body_male_thrust'] = imgBodyMaleThrust;
+    if (imgBodyFemaleBackslash) c['body_female_backslash'] = imgBodyFemaleBackslash;
+    if (imgBodyFemaleClimb) c['body_female_climb'] = imgBodyFemaleClimb;
+    if (imgBodyFemaleCombatidle) c['body_female_combat_idle'] = imgBodyFemaleCombatidle;
+    if (imgBodyFemaleEmote) c['body_female_emote'] = imgBodyFemaleEmote;
+    if (imgBodyFemaleHalfslash) c['body_female_halfslash'] = imgBodyFemaleHalfslash;
+    if (imgBodyFemaleJump) c['body_female_jump'] = imgBodyFemaleJump;
+    if (imgBodyFemaleRun) c['body_female_run'] = imgBodyFemaleRun;
+    if (imgBodyFemaleShoot) c['body_female_shoot'] = imgBodyFemaleShoot;
+    if (imgBodyFemaleSit) c['body_female_sit'] = imgBodyFemaleSit;
+    if (imgBodyFemaleSpellcast) c['body_female_spellcast'] = imgBodyFemaleSpellcast;
+    if (imgBodyFemaleThrust) c['body_female_thrust'] = imgBodyFemaleThrust;
+    if (imgHairBobBackslash) c['hair_bob_backslash'] = imgHairBobBackslash;
+    if (imgHairBobClimb) c['hair_bob_climb'] = imgHairBobClimb;
+    if (imgHairBobCombatidle) c['hair_bob_combat_idle'] = imgHairBobCombatidle;
+    if (imgHairBobEmote) c['hair_bob_emote'] = imgHairBobEmote;
+    if (imgHairBobHalfslash) c['hair_bob_halfslash'] = imgHairBobHalfslash;
+    if (imgHairBobJump) c['hair_bob_jump'] = imgHairBobJump;
+    if (imgHairBobRun) c['hair_bob_run'] = imgHairBobRun;
+    if (imgHairBobShoot) c['hair_bob_shoot'] = imgHairBobShoot;
+    if (imgHairBobSit) c['hair_bob_sit'] = imgHairBobSit;
+    if (imgHairBobSpellcast) c['hair_bob_spellcast'] = imgHairBobSpellcast;
+    if (imgHairBobThrust) c['hair_bob_thrust'] = imgHairBobThrust;
+    if (imgHairBraidBackslash) c['hair_braid_backslash'] = imgHairBraidBackslash;
+    if (imgHairBraidClimb) c['hair_braid_climb'] = imgHairBraidClimb;
+    if (imgHairBraidCombatidle) c['hair_braid_combat_idle'] = imgHairBraidCombatidle;
+    if (imgHairBraidEmote) c['hair_braid_emote'] = imgHairBraidEmote;
+    if (imgHairBraidHalfslash) c['hair_braid_halfslash'] = imgHairBraidHalfslash;
+    if (imgHairBraidJump) c['hair_braid_jump'] = imgHairBraidJump;
+    if (imgHairBraidRun) c['hair_braid_run'] = imgHairBraidRun;
+    if (imgHairBraidShoot) c['hair_braid_shoot'] = imgHairBraidShoot;
+    if (imgHairBraidSit) c['hair_braid_sit'] = imgHairBraidSit;
+    if (imgHairBraidSpellcast) c['hair_braid_spellcast'] = imgHairBraidSpellcast;
+    if (imgHairBraidThrust) c['hair_braid_thrust'] = imgHairBraidThrust;
+    if (imgHairBangsBackslash) c['hair_bangs_backslash'] = imgHairBangsBackslash;
+    if (imgHairBangsClimb) c['hair_bangs_climb'] = imgHairBangsClimb;
+    if (imgHairBangsCombatidle) c['hair_bangs_combat_idle'] = imgHairBangsCombatidle;
+    if (imgHairBangsEmote) c['hair_bangs_emote'] = imgHairBangsEmote;
+    if (imgHairBangsHalfslash) c['hair_bangs_halfslash'] = imgHairBangsHalfslash;
+    if (imgHairBangsJump) c['hair_bangs_jump'] = imgHairBangsJump;
+    if (imgHairBangsRun) c['hair_bangs_run'] = imgHairBangsRun;
+    if (imgHairBangsShoot) c['hair_bangs_shoot'] = imgHairBangsShoot;
+    if (imgHairBangsSit) c['hair_bangs_sit'] = imgHairBangsSit;
+    if (imgHairBangsSpellcast) c['hair_bangs_spellcast'] = imgHairBangsSpellcast;
+    if (imgHairBangsThrust) c['hair_bangs_thrust'] = imgHairBangsThrust;
+    if (imgHairAfroBackslash) c['hair_afro_backslash'] = imgHairAfroBackslash;
+    if (imgHairAfroClimb) c['hair_afro_climb'] = imgHairAfroClimb;
+    if (imgHairAfroCombatidle) c['hair_afro_combat_idle'] = imgHairAfroCombatidle;
+    if (imgHairAfroEmote) c['hair_afro_emote'] = imgHairAfroEmote;
+    if (imgHairAfroHalfslash) c['hair_afro_halfslash'] = imgHairAfroHalfslash;
+    if (imgHairAfroJump) c['hair_afro_jump'] = imgHairAfroJump;
+    if (imgHairAfroRun) c['hair_afro_run'] = imgHairAfroRun;
+    if (imgHairAfroShoot) c['hair_afro_shoot'] = imgHairAfroShoot;
+    if (imgHairAfroSit) c['hair_afro_sit'] = imgHairAfroSit;
+    if (imgHairAfroSpellcast) c['hair_afro_spellcast'] = imgHairAfroSpellcast;
+    if (imgHairAfroThrust) c['hair_afro_thrust'] = imgHairAfroThrust;
+    if (imgHairBuzzcutBackslash) c['hair_buzzcut_backslash'] = imgHairBuzzcutBackslash;
+    if (imgHairBuzzcutClimb) c['hair_buzzcut_climb'] = imgHairBuzzcutClimb;
+    if (imgHairBuzzcutCombatidle) c['hair_buzzcut_combat_idle'] = imgHairBuzzcutCombatidle;
+    if (imgHairBuzzcutEmote) c['hair_buzzcut_emote'] = imgHairBuzzcutEmote;
+    if (imgHairBuzzcutHalfslash) c['hair_buzzcut_halfslash'] = imgHairBuzzcutHalfslash;
+    if (imgHairBuzzcutJump) c['hair_buzzcut_jump'] = imgHairBuzzcutJump;
+    if (imgHairBuzzcutRun) c['hair_buzzcut_run'] = imgHairBuzzcutRun;
+    if (imgHairBuzzcutShoot) c['hair_buzzcut_shoot'] = imgHairBuzzcutShoot;
+    if (imgHairBuzzcutSit) c['hair_buzzcut_sit'] = imgHairBuzzcutSit;
+    if (imgHairBuzzcutSpellcast) c['hair_buzzcut_spellcast'] = imgHairBuzzcutSpellcast;
+    if (imgHairBuzzcutThrust) c['hair_buzzcut_thrust'] = imgHairBuzzcutThrust;
+    if (imgHairCornrowsBackslash) c['hair_cornrows_backslash'] = imgHairCornrowsBackslash;
+    if (imgHairCornrowsClimb) c['hair_cornrows_climb'] = imgHairCornrowsClimb;
+    if (imgHairCornrowsCombatidle) c['hair_cornrows_combat_idle'] = imgHairCornrowsCombatidle;
+    if (imgHairCornrowsEmote) c['hair_cornrows_emote'] = imgHairCornrowsEmote;
+    if (imgHairCornrowsHalfslash) c['hair_cornrows_halfslash'] = imgHairCornrowsHalfslash;
+    if (imgHairCornrowsJump) c['hair_cornrows_jump'] = imgHairCornrowsJump;
+    if (imgHairCornrowsRun) c['hair_cornrows_run'] = imgHairCornrowsRun;
+    if (imgHairCornrowsShoot) c['hair_cornrows_shoot'] = imgHairCornrowsShoot;
+    if (imgHairCornrowsSit) c['hair_cornrows_sit'] = imgHairCornrowsSit;
+    if (imgHairCornrowsSpellcast) c['hair_cornrows_spellcast'] = imgHairCornrowsSpellcast;
+    if (imgHairCornrowsThrust) c['hair_cornrows_thrust'] = imgHairCornrowsThrust;
+    if (imgHairCurlyBackslash) c['hair_curly_backslash'] = imgHairCurlyBackslash;
+    if (imgHairCurlyClimb) c['hair_curly_climb'] = imgHairCurlyClimb;
+    if (imgHairCurlyCombatidle) c['hair_curly_combat_idle'] = imgHairCurlyCombatidle;
+    if (imgHairCurlyEmote) c['hair_curly_emote'] = imgHairCurlyEmote;
+    if (imgHairCurlyHalfslash) c['hair_curly_halfslash'] = imgHairCurlyHalfslash;
+    if (imgHairCurlyJump) c['hair_curly_jump'] = imgHairCurlyJump;
+    if (imgHairCurlyRun) c['hair_curly_run'] = imgHairCurlyRun;
+    if (imgHairCurlyShoot) c['hair_curly_shoot'] = imgHairCurlyShoot;
+    if (imgHairCurlySit) c['hair_curly_sit'] = imgHairCurlySit;
+    if (imgHairCurlySpellcast) c['hair_curly_spellcast'] = imgHairCurlySpellcast;
+    if (imgHairCurlyThrust) c['hair_curly_thrust'] = imgHairCurlyThrust;
+    if (imgHairLongBackslash) c['hair_long_backslash'] = imgHairLongBackslash;
+    if (imgHairLongClimb) c['hair_long_climb'] = imgHairLongClimb;
+    if (imgHairLongCombatidle) c['hair_long_combat_idle'] = imgHairLongCombatidle;
+    if (imgHairLongEmote) c['hair_long_emote'] = imgHairLongEmote;
+    if (imgHairLongHalfslash) c['hair_long_halfslash'] = imgHairLongHalfslash;
+    if (imgHairLongJump) c['hair_long_jump'] = imgHairLongJump;
+    if (imgHairLongRun) c['hair_long_run'] = imgHairLongRun;
+    if (imgHairLongShoot) c['hair_long_shoot'] = imgHairLongShoot;
+    if (imgHairLongSit) c['hair_long_sit'] = imgHairLongSit;
+    if (imgHairLongSpellcast) c['hair_long_spellcast'] = imgHairLongSpellcast;
+    if (imgHairLongThrust) c['hair_long_thrust'] = imgHairLongThrust;
+    if (imgTorsoTshirtBackslash) c['torso_tshirt_backslash'] = imgTorsoTshirtBackslash;
+    if (imgTorsoTshirtClimb) c['torso_tshirt_climb'] = imgTorsoTshirtClimb;
+    if (imgTorsoTshirtCombatidle) c['torso_tshirt_combat_idle'] = imgTorsoTshirtCombatidle;
+    if (imgTorsoTshirtEmote) c['torso_tshirt_emote'] = imgTorsoTshirtEmote;
+    if (imgTorsoTshirtHalfslash) c['torso_tshirt_halfslash'] = imgTorsoTshirtHalfslash;
+    if (imgTorsoTshirtJump) c['torso_tshirt_jump'] = imgTorsoTshirtJump;
+    if (imgTorsoTshirtRun) c['torso_tshirt_run'] = imgTorsoTshirtRun;
+    if (imgTorsoTshirtShoot) c['torso_tshirt_shoot'] = imgTorsoTshirtShoot;
+    if (imgTorsoTshirtSit) c['torso_tshirt_sit'] = imgTorsoTshirtSit;
+    if (imgTorsoTshirtSpellcast) c['torso_tshirt_spellcast'] = imgTorsoTshirtSpellcast;
+    if (imgTorsoTshirtThrust) c['torso_tshirt_thrust'] = imgTorsoTshirtThrust;
+    if (imgTorsoLeatherClimb) c['torso_leather_climb'] = imgTorsoLeatherClimb;
+    if (imgTorsoLeatherEmote) c['torso_leather_emote'] = imgTorsoLeatherEmote;
+    if (imgTorsoLeatherJump) c['torso_leather_jump'] = imgTorsoLeatherJump;
+    if (imgTorsoLeatherShoot) c['torso_leather_shoot'] = imgTorsoLeatherShoot;
+    if (imgTorsoLeatherSit) c['torso_leather_sit'] = imgTorsoLeatherSit;
+    if (imgTorsoLeatherSpellcast) c['torso_leather_spellcast'] = imgTorsoLeatherSpellcast;
+    if (imgTorsoLeatherThrust) c['torso_leather_thrust'] = imgTorsoLeatherThrust;
+    if (imgTorsoPlateBackslash) c['torso_plate_backslash'] = imgTorsoPlateBackslash;
+    if (imgTorsoPlateClimb) c['torso_plate_climb'] = imgTorsoPlateClimb;
+    if (imgTorsoPlateCombatidle) c['torso_plate_combat_idle'] = imgTorsoPlateCombatidle;
+    if (imgTorsoPlateEmote) c['torso_plate_emote'] = imgTorsoPlateEmote;
+    if (imgTorsoPlateHalfslash) c['torso_plate_halfslash'] = imgTorsoPlateHalfslash;
+    if (imgTorsoPlateJump) c['torso_plate_jump'] = imgTorsoPlateJump;
+    if (imgTorsoPlateRun) c['torso_plate_run'] = imgTorsoPlateRun;
+    if (imgTorsoPlateShoot) c['torso_plate_shoot'] = imgTorsoPlateShoot;
+    if (imgTorsoPlateSit) c['torso_plate_sit'] = imgTorsoPlateSit;
+    if (imgTorsoPlateSpellcast) c['torso_plate_spellcast'] = imgTorsoPlateSpellcast;
+    if (imgTorsoPlateThrust) c['torso_plate_thrust'] = imgTorsoPlateThrust;
+    if (imgLegsPantsBackslash) c['legs_pants_backslash'] = imgLegsPantsBackslash;
+    if (imgLegsPantsClimb) c['legs_pants_climb'] = imgLegsPantsClimb;
+    if (imgLegsPantsCombatidle) c['legs_pants_combat_idle'] = imgLegsPantsCombatidle;
+    if (imgLegsPantsEmote) c['legs_pants_emote'] = imgLegsPantsEmote;
+    if (imgLegsPantsHalfslash) c['legs_pants_halfslash'] = imgLegsPantsHalfslash;
+    if (imgLegsPantsJump) c['legs_pants_jump'] = imgLegsPantsJump;
+    if (imgLegsPantsRun) c['legs_pants_run'] = imgLegsPantsRun;
+    if (imgLegsPantsShoot) c['legs_pants_shoot'] = imgLegsPantsShoot;
+    if (imgLegsPantsSit) c['legs_pants_sit'] = imgLegsPantsSit;
+    if (imgLegsPantsSpellcast) c['legs_pants_spellcast'] = imgLegsPantsSpellcast;
+    if (imgLegsPantsThrust) c['legs_pants_thrust'] = imgLegsPantsThrust;
+    if (imgLegsShortsBackslash) c['legs_shorts_backslash'] = imgLegsShortsBackslash;
+    if (imgLegsShortsClimb) c['legs_shorts_climb'] = imgLegsShortsClimb;
+    if (imgLegsShortsCombatidle) c['legs_shorts_combat_idle'] = imgLegsShortsCombatidle;
+    if (imgLegsShortsEmote) c['legs_shorts_emote'] = imgLegsShortsEmote;
+    if (imgLegsShortsHalfslash) c['legs_shorts_halfslash'] = imgLegsShortsHalfslash;
+    if (imgLegsShortsJump) c['legs_shorts_jump'] = imgLegsShortsJump;
+    if (imgLegsShortsRun) c['legs_shorts_run'] = imgLegsShortsRun;
+    if (imgLegsShortsShoot) c['legs_shorts_shoot'] = imgLegsShortsShoot;
+    if (imgLegsShortsSit) c['legs_shorts_sit'] = imgLegsShortsSit;
+    if (imgLegsShortsSpellcast) c['legs_shorts_spellcast'] = imgLegsShortsSpellcast;
+    if (imgLegsShortsThrust) c['legs_shorts_thrust'] = imgLegsShortsThrust;
+    if (imgFeetBootsBackslash) c['feet_boots_backslash'] = imgFeetBootsBackslash;
+    if (imgFeetBootsClimb) c['feet_boots_climb'] = imgFeetBootsClimb;
+    if (imgFeetBootsCombatidle) c['feet_boots_combat_idle'] = imgFeetBootsCombatidle;
+    if (imgFeetBootsEmote) c['feet_boots_emote'] = imgFeetBootsEmote;
+    if (imgFeetBootsHalfslash) c['feet_boots_halfslash'] = imgFeetBootsHalfslash;
+    if (imgFeetBootsJump) c['feet_boots_jump'] = imgFeetBootsJump;
+    if (imgFeetBootsRun) c['feet_boots_run'] = imgFeetBootsRun;
+    if (imgFeetBootsShoot) c['feet_boots_shoot'] = imgFeetBootsShoot;
+    if (imgFeetBootsSit) c['feet_boots_sit'] = imgFeetBootsSit;
+    if (imgFeetBootsSpellcast) c['feet_boots_spellcast'] = imgFeetBootsSpellcast;
+    if (imgFeetBootsThrust) c['feet_boots_thrust'] = imgFeetBootsThrust;
   }, [
     imgBodyMaleWalk, imgBodyMaleIdle, imgBodyMaleSlash, imgBodyMaleHurt,
     imgBodyFemaleWalk, imgBodyFemaleIdle, imgBodyFemaleSlash, imgBodyFemaleHurt,
@@ -255,6 +614,7 @@ export default function LPCSpriteCanvas({
     imgLegsPantsWalk, imgLegsPantsIdle, imgLegsPantsSlash, imgLegsPantsHurt,
     imgLegsShortsWalk, imgLegsShortsIdle, imgLegsShortsSlash, imgLegsShortsHurt,
     imgFeetBootsWalk, imgFeetBootsIdle, imgFeetBootsSlash, imgFeetBootsHurt,
+    imgBodyMaleBackslash,imgBodyMaleClimb,imgBodyMaleCombatidle,imgBodyMaleEmote,imgBodyMaleHalfslash,imgBodyMaleJump,imgBodyMaleRun,imgBodyMaleShoot,imgBodyMaleSit,imgBodyMaleSpellcast,imgBodyMaleThrust,imgBodyFemaleBackslash,imgBodyFemaleClimb,imgBodyFemaleCombatidle,imgBodyFemaleEmote,imgBodyFemaleHalfslash,imgBodyFemaleJump,imgBodyFemaleRun,imgBodyFemaleShoot,imgBodyFemaleSit,imgBodyFemaleSpellcast,imgBodyFemaleThrust,imgHairBobBackslash,imgHairBobClimb,imgHairBobCombatidle,imgHairBobEmote,imgHairBobHalfslash,imgHairBobJump,imgHairBobRun,imgHairBobShoot,imgHairBobSit,imgHairBobSpellcast,imgHairBobThrust,imgHairBraidBackslash,imgHairBraidClimb,imgHairBraidCombatidle,imgHairBraidEmote,imgHairBraidHalfslash,imgHairBraidJump,imgHairBraidRun,imgHairBraidShoot,imgHairBraidSit,imgHairBraidSpellcast,imgHairBraidThrust,imgHairBangsBackslash,imgHairBangsClimb,imgHairBangsCombatidle,imgHairBangsEmote,imgHairBangsHalfslash,imgHairBangsJump,imgHairBangsRun,imgHairBangsShoot,imgHairBangsSit,imgHairBangsSpellcast,imgHairBangsThrust,imgHairAfroBackslash,imgHairAfroClimb,imgHairAfroCombatidle,imgHairAfroEmote,imgHairAfroHalfslash,imgHairAfroJump,imgHairAfroRun,imgHairAfroShoot,imgHairAfroSit,imgHairAfroSpellcast,imgHairAfroThrust,imgHairBuzzcutBackslash,imgHairBuzzcutClimb,imgHairBuzzcutCombatidle,imgHairBuzzcutEmote,imgHairBuzzcutHalfslash,imgHairBuzzcutJump,imgHairBuzzcutRun,imgHairBuzzcutShoot,imgHairBuzzcutSit,imgHairBuzzcutSpellcast,imgHairBuzzcutThrust,imgHairCornrowsBackslash,imgHairCornrowsClimb,imgHairCornrowsCombatidle,imgHairCornrowsEmote,imgHairCornrowsHalfslash,imgHairCornrowsJump,imgHairCornrowsRun,imgHairCornrowsShoot,imgHairCornrowsSit,imgHairCornrowsSpellcast,imgHairCornrowsThrust,imgHairCurlyBackslash,imgHairCurlyClimb,imgHairCurlyCombatidle,imgHairCurlyEmote,imgHairCurlyHalfslash,imgHairCurlyJump,imgHairCurlyRun,imgHairCurlyShoot,imgHairCurlySit,imgHairCurlySpellcast,imgHairCurlyThrust,imgHairLongBackslash,imgHairLongClimb,imgHairLongCombatidle,imgHairLongEmote,imgHairLongHalfslash,imgHairLongJump,imgHairLongRun,imgHairLongShoot,imgHairLongSit,imgHairLongSpellcast,imgHairLongThrust,imgTorsoTshirtBackslash,imgTorsoTshirtClimb,imgTorsoTshirtCombatidle,imgTorsoTshirtEmote,imgTorsoTshirtHalfslash,imgTorsoTshirtJump,imgTorsoTshirtRun,imgTorsoTshirtShoot,imgTorsoTshirtSit,imgTorsoTshirtSpellcast,imgTorsoTshirtThrust,imgTorsoLeatherClimb,imgTorsoLeatherEmote,imgTorsoLeatherJump,imgTorsoLeatherShoot,imgTorsoLeatherSit,imgTorsoLeatherSpellcast,imgTorsoLeatherThrust,imgTorsoPlateBackslash,imgTorsoPlateClimb,imgTorsoPlateCombatidle,imgTorsoPlateEmote,imgTorsoPlateHalfslash,imgTorsoPlateJump,imgTorsoPlateRun,imgTorsoPlateShoot,imgTorsoPlateSit,imgTorsoPlateSpellcast,imgTorsoPlateThrust,imgLegsPantsBackslash,imgLegsPantsClimb,imgLegsPantsCombatidle,imgLegsPantsEmote,imgLegsPantsHalfslash,imgLegsPantsJump,imgLegsPantsRun,imgLegsPantsShoot,imgLegsPantsSit,imgLegsPantsSpellcast,imgLegsPantsThrust,imgLegsShortsBackslash,imgLegsShortsClimb,imgLegsShortsCombatidle,imgLegsShortsEmote,imgLegsShortsHalfslash,imgLegsShortsJump,imgLegsShortsRun,imgLegsShortsShoot,imgLegsShortsSit,imgLegsShortsSpellcast,imgLegsShortsThrust,imgFeetBootsBackslash,imgFeetBootsClimb,imgFeetBootsCombatidle,imgFeetBootsEmote,imgFeetBootsHalfslash,imgFeetBootsJump,imgFeetBootsRun,imgFeetBootsShoot,imgFeetBootsSit,imgFeetBootsSpellcast,imgFeetBootsThrust,
   ]);
 
   // ── Animation frame ticker ───────────────────────────────────────────
